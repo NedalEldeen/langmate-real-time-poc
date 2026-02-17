@@ -1,0 +1,13 @@
+# Dependencies
+node_modules
+
+# Build
+dist
+*.tsbuildinfo
+
+# Turbo
+.turbo
+
+# IDE
+.idea
+.vscode
