@@ -15,13 +15,19 @@
     "@poc/core": "workspace:*",
     "cors": "^2.8.5",
     "dotenv": "^16.5.0",
-    "express": "^5.2.1"
+    "express": "^5.2.1",
+    "multer": "^2.0.2",
+    "openai": "^6.22.0",
+    "socket.io": "^4.8.3",
+    "ws": "^8.19.0"
   },
   "devDependencies": {
     "@repo/eslint-config": "workspace:*",
     "@types/cors": "^2.8.17",
     "@types/express": "^5.0.6",
+    "@types/multer": "^2.0.0",
     "@types/node": "^22.15.3",
+    "@types/ws": "^8.18.1",
     "eslint": "^9.39.1",
     "tsx": "^4.19.4",
     "typescript": "^5.9.3"

@@ -1,0 +1,914 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Realtime Voice Chat — Test UI</title>
+
+  <!--
+    Socket.IO client script — served automatically by the Socket.IO server.
+    The path must match the `path` option in SocketIOServer({ path: ... }).
+  -->
+  <script src="/voice-chat/rt/socket.io.js"></script>
+
+  <style>
+    /* ── Reset ────────────────────────────────────────────────────────── */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: system-ui, -apple-system, sans-serif;
+      background: #0d0d0d;
+      color: #e0e0e0;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 1.5rem 1rem 2rem;
+    }
+
+    /* ── Header ──────────────────────────────────────────────────────── */
+    header { text-align: center; margin-bottom: 1.25rem; }
+    header h1 { font-size: 1.3rem; font-weight: 600; color: #fff; }
+    header p  { font-size: 0.8rem; color: #555; margin-top: 0.25rem; }
+
+    /* ── Top bar: language selector + connection status ─────────────── */
+    .top-bar {
+      display: flex; align-items: center; justify-content: space-between;
+      width: 100%; max-width: 620px;
+      margin-bottom: 0.9rem;
+      gap: 1rem;
+    }
+    .lang-group {
+      display: flex; align-items: center; gap: 0.4rem;
+      font-size: 0.8rem; color: #666;
+    }
+    #languageSelect {
+      padding: 0.35rem 0.6rem;
+      border-radius: 6px; border: 1px solid #2e2e2e;
+      background: #1a1a1a; color: #ccc;
+      font-size: 0.82rem; cursor: pointer; outline: none;
+    }
+    #languageSelect:disabled { opacity: 0.4; cursor: default; }
+
+    /* Status indicator dot + label */
+    .status-bar { display: flex; align-items: center; gap: 0.45rem; font-size: 0.8rem; color: #666; }
+    .dot {
+      width: 7px; height: 7px; border-radius: 50%;
+      background: #333; flex-shrink: 0;
+      transition: background 0.3s, box-shadow 0.3s;
+    }
+    .dot.connected  { background: #22c55e; box-shadow: 0 0 6px #22c55e88; }
+    .dot.recording  { background: #ef4444; animation: blink 0.8s ease-in-out infinite; }
+    .dot.processing { background: #60a5fa; animation: blink 0.6s ease-in-out infinite; }
+    .dot.error      { background: #f97316; }
+    @keyframes blink { 0%,100% { opacity: 1; } 50% { opacity: 0.25; } }
+
+    /* ── Transcript area ─────────────────────────────────────────────── */
+    .transcript-box {
+      width: 100%; max-width: 620px;
+      min-height: 320px; max-height: 420px;
+      background: #111;
+      border: 1px solid #1e1e1e;
+      border-radius: 14px;
+      padding: 1rem;
+      display: flex; flex-direction: column; gap: 0.8rem;
+      overflow-y: auto;
+      margin-bottom: 1.25rem;
+    }
+    .empty-msg { color: #333; font-size: 0.85rem; text-align: center; margin: auto; }
+
+    /* Individual conversation turns */
+    .turn {
+      padding: 0.6rem 0.9rem;
+      border-radius: 10px;
+      font-size: 0.875rem;
+      line-height: 1.6;
+      max-width: 85%;
+    }
+    .turn .label {
+      font-size: 0.67rem; font-weight: 700;
+      letter-spacing: 0.07em; text-transform: uppercase;
+      opacity: 0.55; margin-bottom: 0.2rem;
+    }
+    .turn.user      { background: #1a2e4a; color: #93c5fd; align-self: flex-end; }
+    .turn.assistant { background: #162216; color: #86efac; align-self: flex-start; }
+    .turn.partial   { opacity: 0.65; } /* in-progress turn while streaming */
+
+    /* Embedded audio player shown after each AI response */
+    .ai-audio {
+      display: block; width: 100%; height: 32px;
+      margin-top: 0.5rem; border-radius: 6px;
+      accent-color: #86efac;
+    }
+
+    /* ── Mic / action button ─────────────────────────────────────────── */
+    .action-area {
+      width: 100%; max-width: 620px;
+      display: flex; flex-direction: column; align-items: center; gap: 0.75rem;
+      margin-bottom: 1.25rem;
+    }
+    .mic-btn {
+      display: flex; align-items: center; justify-content: center; gap: 0.6rem;
+      width: 100%; max-width: 280px;
+      padding: 0.8rem 1.5rem;
+      border-radius: 50px; border: none; cursor: pointer;
+      font-size: 1rem; font-weight: 600;
+      transition: all 0.2s;
+    }
+    .mic-btn:disabled { opacity: 0.4; cursor: default; }
+
+    /* Blue = idle / ready to start */
+    .mic-btn.idle { background: #1d4ed8; color: #fff; }
+    .mic-btn.idle:hover:not(:disabled) { background: #1e40af; transform: scale(1.02); }
+
+    /* Red pulsing = actively recording */
+    .mic-btn.recording { background: #dc2626; color: #fff; animation: pulse-red 1.4s ease-in-out infinite; }
+    @keyframes pulse-red {
+      0%,100% { box-shadow: 0 0 0 0 #dc262644; }
+      50%      { box-shadow: 0 0 0 10px #dc262600; }
+    }
+    .mic-btn.recording:hover:not(:disabled) { background: #b91c1c; }
+
+    /* Dark = waiting/processing (disabled) */
+    .mic-btn.waiting { background: #1e293b; color: #64748b; }
+
+    .mic-icon { font-size: 1.1rem; line-height: 1; }
+
+    /* ── Secondary buttons ───────────────────────────────────────────── */
+    .secondary-row { display: flex; gap: 0.6rem; }
+    .sec-btn {
+      padding: 0.45rem 1rem;
+      border-radius: 8px; border: 1px solid #252525;
+      background: #141414; color: #666;
+      font-size: 0.8rem; cursor: pointer;
+      transition: all 0.15s;
+    }
+    .sec-btn:hover:not(:disabled) { background: #1e1e1e; color: #aaa; border-color: #333; }
+    .sec-btn:disabled { opacity: 0.35; cursor: default; }
+    .sec-btn.copied { color: #22c55e; border-color: #22c55e44; }
+
+    /* ── Event log (collapsible) ─────────────────────────────────────── */
+    details { width: 100%; max-width: 620px; }
+    summary { font-size: 0.75rem; color: #444; cursor: pointer; user-select: none; margin-bottom: 0.4rem; }
+    summary:hover { color: #666; }
+    .log-box {
+      width: 100%; height: 160px;
+      background: #080808; border: 1px solid #181818; border-radius: 8px;
+      padding: 0.6rem 0.8rem;
+      font-family: 'SF Mono', 'Fira Code', monospace; font-size: 0.72rem;
+      overflow-y: auto;
+    }
+    /* Log line colour coding */
+    .ll          { line-height: 1.75; white-space: pre-wrap; word-break: break-all; }
+    .ll.info     { color: #444; }   /* local client actions */
+    .ll.in       { color: #34d399; } /* events received from server/OpenAI */
+    .ll.warn     { color: #f59e0b; } /* notable client actions (done_talking) */
+    .ll.err      { color: #f87171; } /* errors */
+    .ll.dim      { color: #2a2a2a; } /* suppressed high-frequency events */
+  </style>
+</head>
+<body>
+
+  <header>
+    <h1>Realtime Voice Chat</h1>
+    <p>Speak → Done → AI responds with text + audio</p>
+  </header>
+
+  <!-- Language selector (disabled once connected) + live status dot -->
+  <div class="top-bar">
+    <div class="lang-group">
+      <label for="languageSelect">Language</label>
+      <select id="languageSelect">
+        <option value="English">English</option>
+        <option value="Spanish">Spanish</option>
+        <option value="French">French</option>
+        <option value="German">German</option>
+        <option value="Italian">Italian</option>
+        <option value="Portuguese">Portuguese</option>
+        <option value="Japanese">Japanese</option>
+        <option value="Korean">Korean</option>
+        <option value="Mandarin Chinese">Mandarin Chinese</option>
+        <option value="Arabic">Arabic</option>
+        <option value="Russian">Russian</option>
+        <option value="Dutch">Dutch</option>
+        <option value="Turkish">Turkish</option>
+        <option value="Hindi">Hindi</option>
+      </select>
+    </div>
+    <div class="status-bar">
+      <div class="dot" id="dot"></div>
+      <span id="statusText">Disconnected</span>
+    </div>
+  </div>
+
+  <!-- Scrollable chat transcript -->
+  <div class="transcript-box" id="transcript">
+    <span class="empty-msg">Connect, then speak to start a conversation.</span>
+  </div>
+
+  <!-- Primary mic button + secondary actions -->
+  <div class="action-area">
+    <button class="mic-btn idle" id="micBtn">
+      <span class="mic-icon">🎙</span>
+      <span id="micBtnLabel">Connect &amp; Start Talking</span>
+    </button>
+
+    <div class="secondary-row">
+      <button class="sec-btn" id="disconnectBtn" disabled>Disconnect</button>
+      <button class="sec-btn" id="copyBtn">Copy transcript</button>
+    </div>
+  </div>
+
+  <!-- Collapsible developer event log -->
+  <details>
+    <summary>Event log</summary>
+    <div class="log-box" id="logBox"></div>
+  </details>
+
+  <script>
+    // ═══════════════════════════════════════════════════════════════════════
+    // APP STATE
+    // ═══════════════════════════════════════════════════════════════════════
+    //
+    // The app moves through these states in sequence:
+    //
+    //   disconnected ──connect()──► idle ──startRecording()──► recording
+    //        ▲                                                      │
+    //        │                                              done_talking
+    //        │                                                      ▼
+    //        └──disconnect()──── idle ◄──response.done──── responding ◄── waiting
+    //
+    // States:
+    //   disconnected  No socket, no mic.  First-time state.
+    //   idle          Socket + OpenAI connected, session configured, ready.
+    //   recording     Mic streaming PCM to server.  "Done Talking" visible.
+    //   waiting       done_talking sent, awaiting response.created from OpenAI.
+    //   responding    AI is streaming audio+text.  Button disabled.
+
+    let appState          = 'disconnected';
+    let socket            = null;     // Socket.IO socket instance
+    let audioCtx          = null;     // Web Audio API context (24 kHz)
+    let micStream         = null;     // MediaStream from getUserMedia
+    let workletNode       = null;     // AudioWorkletNode running PCMCapture
+    let isStreaming       = false;    // true while we should send PCM to server
+    let autoStartRecording = false;   // set before connect; triggers recording on session.updated
+
+    // Playback queue state — ensures AI audio chunks play in order without gaps
+    let nextPlayTime  = 0;            // scheduled end time of the last queued chunk
+    let activeSources = [];           // AudioBufferSourceNodes currently playing
+
+    // Partial DOM elements for in-progress turns (updated incrementally)
+    let partialUserEl = null;         // user bubble being filled by transcription deltas
+    let partialAiEl   = null;         // AI bubble being filled by audio transcript deltas
+    let lastAiEl      = null;         // last completed AI bubble (for audio player attachment)
+
+    // Counters for high-frequency events we suppress individually in the log
+    let audioChunkCount      = 0;     // response.audio.delta chunks received this response
+    let transcriptDeltaCount = 0;     // response.audio_transcript.delta chunks received
+
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // DOM REFERENCES
+    // ═══════════════════════════════════════════════════════════════════════
+
+    const micBtn         = document.getElementById('micBtn');
+    const micBtnLabel    = document.getElementById('micBtnLabel');
+    const disconnectBtn  = document.getElementById('disconnectBtn');
+    const copyBtn        = document.getElementById('copyBtn');
+    const languageSelect = document.getElementById('languageSelect');
+    const dot            = document.getElementById('dot');
+    const statusText     = document.getElementById('statusText');
+    const transcriptEl   = document.getElementById('transcript');
+    const logBox         = document.getElementById('logBox');
+
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // EVENT LOG
+    // ═══════════════════════════════════════════════════════════════════════
+
+    /**
+     * Appends a timestamped line to the developer event log panel.
+     *
+     * @param {string} msg  - Message text.
+     * @param {'info'|'in'|'warn'|'err'|'dim'} kind - CSS class for colour.
+     */
+    function log(msg, kind = 'info') {
+      const el = document.createElement('div');
+      el.className = `ll ${kind}`;
+      el.textContent = `${new Date().toISOString().slice(11, 19)}  ${msg}`;
+      logBox.appendChild(el);
+      logBox.scrollTop = logBox.scrollHeight;
+    }
+
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // STATE MACHINE
+    // ═══════════════════════════════════════════════════════════════════════
+
+    /**
+     * Transitions to a new app state, updating all UI elements accordingly.
+     * Single source of truth for button labels, dot colour, and enabled states.
+     *
+     * @param {'disconnected'|'idle'|'recording'|'waiting'|'responding'} state
+     */
+    function setState(state) {
+      appState = state;
+      micBtn.className = 'mic-btn';
+      micBtn.disabled  = false;
+
+      switch (state) {
+        case 'disconnected':
+          micBtn.classList.add('idle');
+          micBtnLabel.textContent  = 'Connect & Start Talking';
+          dot.className            = 'dot';
+          statusText.textContent   = 'Disconnected';
+          disconnectBtn.disabled   = true;
+          languageSelect.disabled  = false;
+          break;
+
+        case 'idle':
+          micBtn.classList.add('idle');
+          micBtnLabel.textContent  = 'Start Talking';
+          dot.className            = 'dot connected';
+          statusText.textContent   = 'Connected — ready';
+          disconnectBtn.disabled   = false;
+          break;
+
+        case 'recording':
+          micBtn.classList.add('recording');
+          micBtnLabel.textContent  = 'Done Talking';
+          dot.className            = 'dot recording';
+          statusText.textContent   = 'Recording…';
+          disconnectBtn.disabled   = false;
+          break;
+
+        case 'waiting':
+          micBtn.classList.add('waiting');
+          micBtnLabel.textContent  = 'Processing…';
+          micBtn.disabled          = true;
+          dot.className            = 'dot processing';
+          statusText.textContent   = 'Sending to AI…';
+          disconnectBtn.disabled   = false;
+          break;
+
+        case 'responding':
+          micBtn.classList.add('waiting');
+          micBtnLabel.textContent  = 'AI responding…';
+          micBtn.disabled          = true;
+          dot.className            = 'dot connected';
+          statusText.textContent   = 'AI speaking…';
+          disconnectBtn.disabled   = false;
+          break;
+      }
+    }
+
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // TRANSCRIPT DOM HELPERS
+    // ═══════════════════════════════════════════════════════════════════════
+
+    /** Removes the placeholder "Connect to start" message on first turn. */
+    function clearEmpty() {
+      transcriptEl.querySelector('.empty-msg')?.remove();
+    }
+
+    /**
+     * Creates and appends a new chat bubble element.
+     *
+     * @param {'user'|'assistant'} role
+     * @param {string} text    - Initial text content (may be empty for partial).
+     * @param {boolean} partial - If true, adds the .partial faded style.
+     * @returns {HTMLElement}  The created turn div (held to update incrementally).
+     */
+    function appendTurn(role, text = '', partial = false) {
+      clearEmpty();
+      const el  = document.createElement('div');
+      el.className = `turn ${role}${partial ? ' partial' : ''}`;
+
+      const lbl = document.createElement('div');
+      lbl.className   = 'label';
+      lbl.textContent = role === 'user' ? 'You' : 'Assistant';
+
+      const body = document.createElement('span');
+      body.textContent = text;
+
+      el.append(lbl, body);
+      transcriptEl.appendChild(el);
+      transcriptEl.scrollTop = transcriptEl.scrollHeight;
+      return el;
+    }
+
+    /** Returns the text <span> inside a turn element. */
+    function bodyOf(el) { return el.querySelector('span'); }
+
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // AUDIO PLAYBACK  (streams AI audio in real time)
+    // ═══════════════════════════════════════════════════════════════════════
+
+    /** Stops all currently scheduled audio sources and resets the play clock. */
+    function stopPlayback() {
+      activeSources.forEach(s => { try { s.stop(0); } catch {} });
+      activeSources = [];
+      if (audioCtx) nextPlayTime = audioCtx.currentTime;
+    }
+
+    /**
+     * Decodes a base64 PCM16 LE chunk and schedules it for gapless playback.
+     *
+     * OpenAI streams audio as many small PCM16 chunks.  We schedule each one
+     * to start exactly where the previous one ended, achieving gapless output.
+     *
+     * @param {string} base64 - Base64-encoded PCM16 LE 24 kHz mono chunk.
+     */
+    function playPcmDelta(base64) {
+      if (!audioCtx || !base64) return;
+
+      // Decode base64 → binary → Uint8Array
+      const binary = atob(base64);
+      const bytes  = new Uint8Array(binary.length);
+      for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+
+      const samples = bytes.length / 2; // 16-bit = 2 bytes per sample
+      if (samples === 0) return;
+
+      // Convert PCM16 signed integers to normalised float32 (range -1..1)
+      const buf = audioCtx.createBuffer(1, samples, 24_000);
+      const ch  = buf.getChannelData(0);
+      const dv  = new DataView(bytes.buffer);
+      for (let i = 0; i < samples; i++) {
+        ch[i] = dv.getInt16(i * 2, true /* little-endian */) / 32_767;
+      }
+
+      // Schedule this chunk to play immediately after the previous one
+      const src = audioCtx.createBufferSource();
+      src.buffer = buf;
+      src.connect(audioCtx.destination);
+      src.onended = () => { activeSources = activeSources.filter(s => s !== src); };
+
+      const now = audioCtx.currentTime;
+      if (nextPlayTime < now) nextPlayTime = now + 0.04; // small safety buffer
+      src.start(nextPlayTime);
+      nextPlayTime += buf.duration;
+      activeSources.push(src);
+    }
+
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // AUDIO CAPTURE  (streams user mic to server via AudioWorklet)
+    // ═══════════════════════════════════════════════════════════════════════
+
+    /**
+     * AudioWorklet processor source.
+     *
+     * Runs in a dedicated audio thread.  Receives 128-sample float32 blocks
+     * from the microphone and posts them to the main thread via MessagePort.
+     *
+     * Loaded dynamically via a Blob URL so we don't need a separate JS file.
+     */
+    const WORKLET_SRC = `
+class PCMCapture extends AudioWorkletProcessor {
+  process(inputs) {
+    const ch = inputs[0]?.[0];
+    // Only post if there is actual audio data in this block
+    if (ch && ch.length > 0) this.port.postMessage(ch.slice());
+    return true; // keep processor alive
+  }
+}
+registerProcessor('pcm-capture', PCMCapture);
+`;
+
+    /**
+     * Converts a Float32Array of audio samples to a base64-encoded PCM16 LE string.
+     *
+     * OpenAI expects PCM16 little-endian signed 16-bit samples.
+     * We clamp each sample to [-1, 1] then multiply by 32767 to get int16 range.
+     *
+     * @param {Float32Array} f32 - Audio samples in [-1, 1] range.
+     * @returns {string} Base64-encoded PCM16 LE audio.
+     */
+    function f32ToBase64Pcm16(f32) {
+      const buf  = new ArrayBuffer(f32.length * 2);
+      const view = new DataView(buf);
+      for (let i = 0; i < f32.length; i++) {
+        const s = Math.max(-1, Math.min(1, f32[i]));
+        view.setInt16(i * 2, s * 32_767, true /* little-endian */);
+      }
+      let bin = '';
+      const bytes = new Uint8Array(buf);
+      for (let i = 0; i < bytes.byteLength; i++) bin += String.fromCharCode(bytes[i]);
+      return btoa(bin);
+    }
+
+    /**
+     * Requests microphone access, creates an AudioContext at 24 kHz, and starts
+     * the PCMCapture AudioWorklet.
+     *
+     * The worklet runs continuously once started; PCM is only forwarded to the
+     * server when `isStreaming` is true (i.e., while the user is recording).
+     */
+    async function initMic() {
+      micStream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          sampleRate: 24_000,
+          channelCount: 1,
+          echoCancellation: true,
+          noiseSuppression: true,
+        },
+      });
+
+      audioCtx = new AudioContext({ sampleRate: 24_000 });
+
+      // Load the worklet processor from a Blob URL (avoids needing a separate file)
+      const blob    = new Blob([WORKLET_SRC], { type: 'application/javascript' });
+      const blobUrl = URL.createObjectURL(blob);
+      await audioCtx.audioWorklet.addModule(blobUrl);
+      URL.revokeObjectURL(blobUrl);
+
+      const source = audioCtx.createMediaStreamSource(micStream);
+      workletNode  = new AudioWorkletNode(audioCtx, 'pcm-capture');
+
+      let workletTicks = 0;
+      workletNode.port.onmessage = (e) => {
+        workletTicks++;
+
+        // Log the first tick to confirm the worklet is actually running
+        if (workletTicks === 1) log('Audio worklet active ✓');
+
+        // Only forward PCM to the server while we are in recording state
+        if (!isStreaming || !socket) return;
+
+        socket.emit('message', {
+          type:  'input_audio_buffer.append',
+          audio: f32ToBase64Pcm16(e.data),
+        });
+      };
+
+      source.connect(workletNode);
+      log('Mic initialised at 24 kHz');
+    }
+
+    /**
+     * Tears down all audio resources: stops the worklet, mic tracks, and closes
+     * the AudioContext.  Safe to call even if initMic() was never completed.
+     */
+    function teardownMic() {
+      isStreaming = false;
+      workletNode?.disconnect(); workletNode = null;
+      micStream?.getTracks().forEach(t => t.stop()); micStream = null;
+      audioCtx?.close();         audioCtx = null;
+      nextPlayTime = 0;
+    }
+
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // OPENAI / SERVER EVENT HANDLER
+    // ═══════════════════════════════════════════════════════════════════════
+
+    /**
+     * Handles all events received from the server via Socket.IO.
+     *
+     * The server forwards every OpenAI Realtime API event plus two custom events:
+     *   • ai_audio_ready  — AI WAV file is saved; URL provided for <audio> element.
+     *
+     * Event flow for a single turn:
+     *   session.created → session.updated
+     *   (user speaks) → input_audio_buffer.* → conversation.item.*
+     *   → response.created → response.audio.delta (×N) → response.audio.done
+     *   → response.audio_transcript.delta (×N) → response.audio_transcript.done
+     *   → response.done → ai_audio_ready
+     *
+     * @param {object} ev - Parsed JSON event from the server.
+     */
+    function onEvent(ev) {
+      const t = ev.type;
+
+      // ── Logging ──────────────────────────────────────────────────────────
+      // High-frequency delta events (audio chunks, transcript deltas) are
+      // counted silently and summarised in their corresponding "done" event.
+      if (t === 'response.audio.delta') {
+        audioChunkCount++;
+        // Fall through to playback handler — no log line for individual chunks
+      } else if (t === 'response.audio_transcript.delta') {
+        transcriptDeltaCount++;
+        // Fall through to text handler — no log line for individual deltas
+      } else {
+        log(`← ${t}`, 'in');
+      }
+
+      // ── Session lifecycle ─────────────────────────────────────────────────
+
+      if (t === 'session.created') {
+        // Server will now send session.update to configure the OpenAI session
+        return;
+      }
+
+      if (t === 'session.updated') {
+        // Session is fully configured.  If autoStartRecording is set (user clicked
+        // "Connect & Start Talking"), begin recording immediately.
+        if (autoStartRecording) {
+          autoStartRecording = false;
+          startRecording();
+        }
+        return;
+      }
+
+      // ── User speech transcription ─────────────────────────────────────────
+      // With turn_detection: null, these events fire AFTER input_audio_buffer.commit,
+      // not during recording.  The partial bubble is pre-created in startRecording().
+
+      if (t === 'input_audio_buffer.speech_started') {
+        // Only fires if turn_detection is enabled (not used in manual mode)
+        if (!partialUserEl) partialUserEl = appendTurn('user', '', true);
+        return;
+      }
+
+      if (t === 'conversation.item.input_audio_transcription.delta') {
+        // Incremental transcription of the user's speech (fires post-commit)
+        if (!partialUserEl) partialUserEl = appendTurn('user', '', true);
+        bodyOf(partialUserEl).textContent += ev.delta ?? '';
+        transcriptEl.scrollTop = transcriptEl.scrollHeight;
+        return;
+      }
+
+      if (t === 'conversation.item.input_audio_transcription.completed') {
+        // Final transcription — overwrite any partial text with the clean result
+        if (!partialUserEl) partialUserEl = appendTurn('user', '', true);
+        partialUserEl.classList.remove('partial');
+        bodyOf(partialUserEl).textContent = ev.transcript ?? '';
+        partialUserEl = null;
+        log(`  transcription: "${(ev.transcript ?? '').slice(0, 60)}"`, 'info');
+        return;
+      }
+
+      // ── AI response ───────────────────────────────────────────────────────
+
+      if (t === 'response.created') {
+        // A new response is starting — create the AI bubble and enter responding state
+        setState('responding');
+        if (!partialAiEl) partialAiEl = appendTurn('assistant', '', true);
+        return;
+      }
+
+      if (t === 'response.audio.delta') {
+        // Stream audio chunk to the speaker for real-time playback
+        playPcmDelta(ev.delta);
+        return;
+      }
+
+      if (t === 'response.audio.done') {
+        // All audio chunks received for this response
+        log(`  audio streaming complete (${audioChunkCount} chunks)`, 'info');
+        audioChunkCount = 0;
+        return;
+      }
+
+      if (t === 'response.audio_transcript.delta') {
+        // Incremental transcript of the AI's speech — update the bubble in real time.
+        // Both response.audio_transcript.delta and response.text.delta may fire;
+        // response.audio_transcript.done will overwrite with the final clean text.
+        if (!partialAiEl) partialAiEl = appendTurn('assistant', '', true);
+        bodyOf(partialAiEl).textContent += ev.delta ?? '';
+        transcriptEl.scrollTop = transcriptEl.scrollHeight;
+        return;
+      }
+
+      if (t === 'response.text.delta') {
+        // Text modality delta — same content as audio_transcript.delta in most cases.
+        // Handled as a fallback in case audio_transcript.delta doesn't fire.
+        if (!partialAiEl) partialAiEl = appendTurn('assistant', '', true);
+        bodyOf(partialAiEl).textContent += ev.delta ?? '';
+        transcriptEl.scrollTop = transcriptEl.scrollHeight;
+        return;
+      }
+
+      if (t === 'response.audio_transcript.done') {
+        // Final transcript — overwrite the bubble to correct any duplicates from
+        // both delta event types firing simultaneously.
+        log(`  transcript complete (${transcriptDeltaCount} deltas)`, 'info');
+        transcriptDeltaCount = 0;
+        if (partialAiEl && ev.transcript) {
+          bodyOf(partialAiEl).textContent = ev.transcript;
+        }
+        return;
+      }
+
+      if (t === 'response.done') {
+        // Response is complete — finalise the AI bubble and return to idle
+        if (partialAiEl) {
+          partialAiEl.classList.remove('partial');
+          lastAiEl   = partialAiEl; // keep reference for the upcoming ai_audio_ready
+          partialAiEl = null;
+        }
+        if (partialUserEl) {
+          partialUserEl.classList.remove('partial');
+          partialUserEl = null;
+        }
+        setState('idle');
+        return;
+      }
+
+      // ── Custom server events ──────────────────────────────────────────────
+
+      if (t === 'ai_audio_ready') {
+        // The server has saved the AI's audio as a WAV and provides a URL.
+        // Append an <audio> player to the last AI bubble so the user can replay it.
+        if (lastAiEl && ev.url) {
+          const audio     = document.createElement('audio');
+          audio.controls  = true;
+          audio.src       = ev.url;
+          audio.className = 'ai-audio';
+          lastAiEl.appendChild(audio);
+          log(`  AI audio saved → ${ev.url}`, 'info');
+        }
+        return;
+      }
+
+      // ── Errors ────────────────────────────────────────────────────────────
+
+      if (t === 'error') {
+        log(`error: ${ev.error?.message ?? JSON.stringify(ev.error)}`, 'err');
+        return;
+      }
+
+      // Any other event from OpenAI (rate_limits.updated, etc.) — already logged above
+    }
+
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // RECORDING CONTROL
+    // ═══════════════════════════════════════════════════════════════════════
+
+    /**
+     * Transitions from idle to recording state.
+     *
+     * Sets isStreaming = true so the AudioWorklet starts forwarding PCM to the
+     * server, creates a new partial user bubble, and updates the UI.
+     *
+     * Guard: no-op if appState is not 'idle' (prevents double-start).
+     */
+    function startRecording() {
+      if (appState !== 'idle') return;
+      isStreaming   = true;
+      setState('recording');
+      partialUserEl = appendTurn('user', '', true);
+      log('Recording started');
+    }
+
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // CONNECTION MANAGEMENT
+    // ═══════════════════════════════════════════════════════════════════════
+
+    /**
+     * Requests mic access, creates a Socket.IO connection, and sets
+     * autoStartRecording so recording begins automatically on session.updated.
+     *
+     * Connection sequence:
+     *   1. getUserMedia (mic access)
+     *   2. io() → Socket.IO connect
+     *   3. socket.on('connect') → setState('idle')
+     *   4. OpenAI session.created → server sends session.update
+     *   5. session.updated → startRecording() (via autoStartRecording)
+     */
+    async function connect() {
+      micBtn.disabled        = true;
+      statusText.textContent = 'Requesting mic…';
+
+      // Request microphone access first — fail fast if denied
+      try {
+        await initMic();
+      } catch (err) {
+        log(`Mic error: ${err.message}`, 'err');
+        setState('disconnected');
+        dot.className          = 'dot error';
+        statusText.textContent = 'Mic access denied';
+        micBtn.disabled        = false;
+        return;
+      }
+
+      const language = languageSelect.value;
+      languageSelect.disabled = true;
+      log(`Connecting  language=${language}`);
+
+      // Set flag before creating the socket so we don't miss session.updated
+      autoStartRecording = true;
+
+      // Connect to the Socket.IO namespace; pass language as a query param
+      // so the server can configure the OpenAI session before the first event.
+      socket = io({ path: '/voice-chat/rt', query: { language } });
+
+      socket.on('connect', () => {
+        log(`Socket connected  id=${socket.id}`, 'in');
+        setState('idle');
+      });
+
+      // All OpenAI events (plus custom server events) arrive on 'message'
+      socket.on('message', onEvent);
+
+      socket.on('connect_error', (err) => {
+        log(`connect_error: ${err.message}`, 'err');
+        setState('disconnected');
+        dot.className          = 'dot error';
+        statusText.textContent = 'Connection failed';
+        languageSelect.disabled = false;
+        teardownMic();
+      });
+
+      socket.on('disconnect', (reason) => {
+        log(`Disconnected: ${reason}`, 'warn');
+        setState('disconnected');
+        languageSelect.disabled = false;
+        teardownMic();
+        stopPlayback();
+        // Clear in-progress bubbles so the next session starts clean
+        partialUserEl = null;
+        partialAiEl   = null;
+        lastAiEl      = null;
+      });
+    }
+
+    /**
+     * Disconnects the socket and tears down all audio resources.
+     * Safe to call from any state.
+     */
+    function disconnect() {
+      socket?.disconnect();
+      socket = null;
+      teardownMic();
+      stopPlayback();
+      setState('disconnected');
+      languageSelect.disabled = false;
+      partialUserEl = null;
+      partialAiEl   = null;
+      lastAiEl      = null;
+    }
+
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // MIC BUTTON — primary interaction
+    // ═══════════════════════════════════════════════════════════════════════
+
+    /**
+     * Single button drives the full interaction lifecycle:
+     *
+     *   disconnected  → connect() + autoStartRecording
+     *   idle          → startRecording()
+     *   recording     → send done_talking, transition to waiting
+     *   waiting/responding → disabled (no-op)
+     */
+    micBtn.addEventListener('click', async () => {
+      if (appState === 'disconnected') {
+        await connect();
+        return;
+      }
+
+      if (appState === 'idle') {
+        startRecording();
+        return;
+      }
+
+      if (appState === 'recording') {
+        // Stop streaming PCM and tell the server the user is done
+        isStreaming = false;
+        log('→ done_talking sent', 'warn');
+        socket.emit('message', { type: 'done_talking' });
+        setState('waiting');
+        return;
+      }
+    });
+
+    disconnectBtn.addEventListener('click', disconnect);
+
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // COPY TRANSCRIPT
+    // ═══════════════════════════════════════════════════════════════════════
+
+    /**
+     * Copies the visible conversation transcript to the clipboard as plain text.
+     * Ignores empty bubbles and partial (in-progress) turns.
+     */
+    copyBtn.addEventListener('click', () => {
+      const turns = transcriptEl.querySelectorAll('.turn');
+      if (!turns.length) return;
+
+      const lines = [];
+      turns.forEach(turn => {
+        const role = turn.classList.contains('user') ? 'You' : 'Assistant';
+        const text = turn.querySelector('span')?.textContent?.trim() ?? '';
+        if (text) lines.push(`${role}: ${text}`);
+      });
+
+      navigator.clipboard.writeText(lines.join('\n\n')).then(() => {
+        copyBtn.textContent = 'Copied!';
+        copyBtn.classList.add('copied');
+        setTimeout(() => {
+          copyBtn.textContent = 'Copy transcript';
+          copyBtn.classList.remove('copied');
+        }, 2_000);
+      });
+    });
+  </script>
+</body>
+</html>
