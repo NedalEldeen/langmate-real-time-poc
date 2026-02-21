@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Realtime Voice Chat — Test UI</title>
+  <title>Langmate</title>
 
   <!--
     Socket.IO client script — served automatically by the Socket.IO server.
@@ -20,16 +20,149 @@
       background: #0d0d0d;
       color: #e0e0e0;
       min-height: 100vh;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      padding: 1.5rem 1rem 2rem;
     }
 
-    /* ── Header ──────────────────────────────────────────────────────── */
-    header { text-align: center; margin-bottom: 1.25rem; }
-    header h1 { font-size: 1.3rem; font-weight: 600; color: #fff; }
-    header p  { font-size: 0.8rem; color: #555; margin-top: 0.25rem; }
+    /* ── Screens ─────────────────────────────────────────────────────── */
+    .screen {
+      display: none;
+      flex-direction: column;
+      align-items: center;
+      min-height: 100vh;
+      padding: 1.5rem 1rem 2rem;
+    }
+    .screen.active { display: flex; }
+
+    /* ── Home screen ─────────────────────────────────────────────────── */
+    .home-header { text-align: center; margin-bottom: 2rem; }
+    .home-header h1 { font-size: 2rem; font-weight: 700; color: #fff; letter-spacing: -0.5px; }
+    .home-header p  { font-size: 0.85rem; color: #444; margin-top: 0.4rem; }
+
+    .new-conv-btn {
+      width: 100%; max-width: 420px;
+      padding: 0.85rem 1.5rem;
+      background: #1d4ed8; color: #fff;
+      border: none; border-radius: 12px;
+      font-size: 1rem; font-weight: 600;
+      cursor: pointer; transition: all 0.2s;
+      margin-bottom: 2rem;
+    }
+    .new-conv-btn:hover { background: #1e40af; transform: scale(1.01); }
+
+    .section-label {
+      width: 100%; max-width: 420px;
+      font-size: 0.72rem; font-weight: 600;
+      letter-spacing: 0.08em; text-transform: uppercase;
+      color: #444; margin-bottom: 0.75rem;
+    }
+
+    /* Session card list */
+    .session-list {
+      width: 100%; max-width: 420px;
+      display: flex; flex-direction: column; gap: 0.6rem;
+    }
+
+    .session-card {
+      background: #111; border: 1px solid #1e1e1e;
+      border-radius: 12px; padding: 0.85rem 1rem;
+      display: flex; align-items: center; justify-content: space-between;
+      gap: 0.75rem; cursor: pointer;
+      transition: border-color 0.15s, background 0.15s;
+    }
+    .session-card:hover { background: #161616; border-color: #2a2a2a; }
+
+    .session-meta { flex: 1; min-width: 0; }
+    .session-lang {
+      font-size: 0.9rem; font-weight: 600; color: #e0e0e0;
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+    .session-detail {
+      font-size: 0.75rem; color: #555; margin-top: 0.2rem;
+      display: flex; gap: 0.75rem; align-items: center;
+    }
+    .session-turns { color: #666; }
+    .badge {
+      font-size: 0.65rem; font-weight: 700; letter-spacing: 0.05em;
+      text-transform: uppercase; padding: 0.15rem 0.5rem;
+      border-radius: 4px;
+    }
+    .badge.active  { background: #052e16; color: #4ade80; }
+    .badge.ended   { background: #0f172a; color: #475569; }
+
+    .resume-btn {
+      padding: 0.4rem 0.9rem; border-radius: 8px;
+      background: #1a2e4a; color: #93c5fd;
+      border: 1px solid #1e3a5f; font-size: 0.8rem;
+      cursor: pointer; white-space: nowrap; flex-shrink: 0;
+      transition: all 0.15s;
+    }
+    .resume-btn:hover { background: #1e3a5f; border-color: #2d5a8e; }
+
+    .no-sessions {
+      text-align: center; color: #333; font-size: 0.85rem;
+      padding: 2rem 0;
+    }
+
+    .user-id-row {
+      width: 100%; max-width: 420px;
+      font-size: 0.68rem; color: #2a2a2a;
+      margin-top: 2rem; text-align: center;
+    }
+
+    /* ── Profile form ────────────────────────────────────────────────── */
+    .profile-section {
+      width: 100%; max-width: 420px;
+      margin-top: 1.5rem;
+    }
+    .profile-section summary {
+      font-size: 0.72rem; font-weight: 600; letter-spacing: 0.08em;
+      text-transform: uppercase; color: #3a3a3a;
+      cursor: pointer; user-select: none; list-style: none;
+      display: flex; align-items: center; gap: 0.4rem;
+    }
+    .profile-section summary:hover { color: #666; }
+    .profile-section summary::before { content: "▶"; font-size: 0.55rem; }
+    .profile-section[open] summary::before { content: "▼"; }
+
+    .profile-grid {
+      display: grid; grid-template-columns: 1fr 1fr; gap: 0.6rem;
+      margin-top: 0.85rem;
+    }
+    .profile-grid .full { grid-column: 1 / -1; }
+
+    .field-label {
+      font-size: 0.7rem; color: #555; margin-bottom: 0.2rem; display: block;
+    }
+    .field-input {
+      width: 100%; padding: 0.4rem 0.6rem;
+      background: #111; border: 1px solid #222; border-radius: 6px;
+      color: #ccc; font-size: 0.8rem; outline: none;
+    }
+    .field-input:focus { border-color: #2d4a7a; }
+
+    .save-profile-btn {
+      grid-column: 1 / -1;
+      padding: 0.45rem 1rem; border-radius: 8px;
+      background: #0f2040; color: #60a5fa;
+      border: 1px solid #1e3a5f; font-size: 0.8rem;
+      cursor: pointer; transition: all 0.15s; width: 100%;
+    }
+    .save-profile-btn:hover  { background: #1e3a5f; }
+    .save-profile-btn.saved  { color: #4ade80; border-color: #14532d; background: #052e16; }
+
+    /* ── Chat screen header ───────────────────────────────────────────── */
+    .chat-header {
+      width: 100%; max-width: 620px;
+      display: flex; align-items: center; gap: 0.75rem;
+      margin-bottom: 1.25rem;
+    }
+    .back-btn {
+      padding: 0.35rem 0.75rem; border-radius: 8px;
+      border: 1px solid #252525; background: #111;
+      color: #666; font-size: 0.8rem; cursor: pointer;
+      flex-shrink: 0; transition: all 0.15s;
+    }
+    .back-btn:hover { background: #1a1a1a; color: #aaa; }
+    .chat-header h1 { font-size: 1rem; font-weight: 600; color: #fff; }
 
     /* ── Top bar: language selector + connection status ─────────────── */
     .top-bar {
@@ -92,7 +225,18 @@
     }
     .turn.user      { background: #1a2e4a; color: #93c5fd; align-self: flex-end; }
     .turn.assistant { background: #162216; color: #86efac; align-self: flex-start; }
-    .turn.partial   { opacity: 0.65; } /* in-progress turn while streaming */
+    .turn.partial   { opacity: 0.65; }
+
+    /* History turns from previous sessions — slightly dimmed */
+    .turn.history   { opacity: 0.45; }
+    .turn.history .label::after { content: " · prev"; }
+
+    /* Divider between history and new session */
+    .history-divider {
+      text-align: center; font-size: 0.7rem; color: #2a2a2a;
+      border-top: 1px solid #1a1a1a; padding-top: 0.5rem;
+      margin: 0.2rem 0;
+    }
 
     /* Embedded audio player shown after each AI response */
     .ai-audio {
@@ -100,6 +244,62 @@
       margin-top: 0.5rem; border-radius: 6px;
       accent-color: #86efac;
     }
+
+    /* ── Feedback card (§4 structured output) ───────────────────────── */
+    .feedback-card {
+      align-self: flex-start;
+      width: calc(85% + 0px); /* match .turn max-width visually */
+      max-width: 85%;
+      background: #0e1a14;
+      border: 1px solid #1a3022;
+      border-radius: 10px;
+      padding: 0.65rem 0.85rem 0.7rem;
+      font-size: 0.8rem;
+      line-height: 1.55;
+      margin-top: -0.35rem; /* tuck slightly under the AI bubble */
+    }
+
+    .feedback-header {
+      font-size: 0.63rem; font-weight: 700;
+      letter-spacing: 0.08em; text-transform: uppercase;
+      color: #2a5c3a; margin-bottom: 0.5rem;
+      display: flex; align-items: center; justify-content: space-between;
+    }
+
+    /* Fluency score bar */
+    .fluency-row {
+      display: flex; align-items: center; gap: 0.55rem;
+      margin-bottom: 0.5rem;
+    }
+    .fluency-label { color: #3a6b4a; font-size: 0.72rem; min-width: 3.5rem; }
+    .fluency-track {
+      flex: 1; height: 6px; background: #0a120e;
+      border-radius: 3px; overflow: hidden;
+    }
+    .fluency-fill  {
+      height: 100%; border-radius: 3px;
+      transition: width 0.4s ease;
+    }
+    .fluency-score { color: #86efac; font-size: 0.72rem; font-weight: 600; min-width: 2rem; text-align: right; }
+
+    /* Grammar error chips */
+    .grammar-errors { display: flex; flex-direction: column; gap: 0.35rem; margin-bottom: 0.5rem; }
+    .grammar-error  {
+      background: #1a0e0e; border: 1px solid #2a1a1a;
+      border-radius: 6px; padding: 0.3rem 0.55rem;
+      color: #ccc;
+    }
+    .grammar-error .err-original   { color: #f87171; text-decoration: line-through; font-size: 0.77rem; }
+    .grammar-error .err-arrow      { color: #555; margin: 0 0.3rem; }
+    .grammar-error .err-suggestion { color: #86efac; font-size: 0.77rem; }
+    .grammar-error .err-rule       { color: #444; font-size: 0.7rem; display: block; margin-top: 0.15rem; }
+
+    /* Tip */
+    .feedback-tip {
+      color: #3a6b4a; font-size: 0.75rem;
+      border-top: 1px solid #1a2e22; padding-top: 0.4rem; margin-top: 0.1rem;
+    }
+    .feedback-tip::before { content: "💡 "; }
 
     /* ── Mic / action button ─────────────────────────────────────────── */
     .action-area {
@@ -116,22 +316,15 @@
       transition: all 0.2s;
     }
     .mic-btn:disabled { opacity: 0.4; cursor: default; }
-
-    /* Blue = idle / ready to start */
     .mic-btn.idle { background: #1d4ed8; color: #fff; }
     .mic-btn.idle:hover:not(:disabled) { background: #1e40af; transform: scale(1.02); }
-
-    /* Red pulsing = actively recording */
     .mic-btn.recording { background: #dc2626; color: #fff; animation: pulse-red 1.4s ease-in-out infinite; }
     @keyframes pulse-red {
       0%,100% { box-shadow: 0 0 0 0 #dc262644; }
       50%      { box-shadow: 0 0 0 10px #dc262600; }
     }
     .mic-btn.recording:hover:not(:disabled) { background: #b91c1c; }
-
-    /* Dark = waiting/processing (disabled) */
     .mic-btn.waiting { background: #1e293b; color: #64748b; }
-
     .mic-icon { font-size: 1.1rem; line-height: 1; }
 
     /* ── Secondary buttons ───────────────────────────────────────────── */
@@ -158,118 +351,206 @@
       font-family: 'SF Mono', 'Fira Code', monospace; font-size: 0.72rem;
       overflow-y: auto;
     }
-    /* Log line colour coding */
     .ll          { line-height: 1.75; white-space: pre-wrap; word-break: break-all; }
-    .ll.info     { color: #444; }   /* local client actions */
-    .ll.in       { color: #34d399; } /* events received from server/OpenAI */
-    .ll.warn     { color: #f59e0b; } /* notable client actions (done_talking) */
-    .ll.err      { color: #f87171; } /* errors */
-    .ll.dim      { color: #2a2a2a; } /* suppressed high-frequency events */
+    .ll.info     { color: #444; }
+    .ll.in       { color: #34d399; }
+    .ll.warn     { color: #f59e0b; }
+    .ll.err      { color: #f87171; }
+    .ll.dim      { color: #2a2a2a; }
   </style>
 </head>
 <body>
 
-  <header>
-    <h1>Realtime Voice Chat</h1>
-    <p>Speak → Done → AI responds with text + audio</p>
-  </header>
+  <!-- ══════════════════════════════════════════════════════════════════════ -->
+  <!-- SCREEN 1 — HOME (conversation list)                                   -->
+  <!-- ══════════════════════════════════════════════════════════════════════ -->
+  <div id="homeScreen" class="screen active">
 
-  <!-- Language selector (disabled once connected) + live status dot -->
-  <div class="top-bar">
-    <div class="lang-group">
-      <label for="languageSelect">Language</label>
-      <select id="languageSelect">
-        <option value="English">English</option>
-        <option value="Spanish">Spanish</option>
-        <option value="French">French</option>
-        <option value="German">German</option>
-        <option value="Italian">Italian</option>
-        <option value="Portuguese">Portuguese</option>
-        <option value="Japanese">Japanese</option>
-        <option value="Korean">Korean</option>
-        <option value="Mandarin Chinese">Mandarin Chinese</option>
-        <option value="Arabic">Arabic</option>
-        <option value="Russian">Russian</option>
-        <option value="Dutch">Dutch</option>
-        <option value="Turkish">Turkish</option>
-        <option value="Hindi">Hindi</option>
-      </select>
+    <div class="home-header">
+      <h1>Langmate</h1>
+      <p>Voice conversation practice</p>
     </div>
-    <div class="status-bar">
-      <div class="dot" id="dot"></div>
-      <span id="statusText">Disconnected</span>
+
+    <button class="new-conv-btn" id="newConvBtn">+ New Conversation</button>
+
+    <div class="section-label">Past Conversations</div>
+
+    <div class="session-list" id="sessionList">
+      <div class="no-sessions">Loading…</div>
     </div>
+
+    <div class="user-id-row" id="userIdRow"></div>
+
+    <!-- Profile editor (collapsed by default) -->
+    <details class="profile-section" id="profileSection">
+      <summary>Your Profile</summary>
+      <div class="profile-grid">
+
+        <div>
+          <label class="field-label">Name</label>
+          <input class="field-input" id="profileName" placeholder="e.g. Nader" />
+        </div>
+        <div>
+          <label class="field-label">Native Language</label>
+          <input class="field-input" id="profileNativeLang" placeholder="e.g. Arabic" />
+        </div>
+
+        <div>
+          <label class="field-label">Level</label>
+          <select class="field-input" id="profileLevel">
+            <option value="">— not set —</option>
+            <option value="A1">A1 — Beginner</option>
+            <option value="A2">A2 — Elementary</option>
+            <option value="B1">B1 — Intermediate</option>
+            <option value="B2">B2 — Upper-Intermediate</option>
+            <option value="C1">C1 — Advanced</option>
+            <option value="C2">C2 — Proficient</option>
+          </select>
+        </div>
+        <div><!-- spacer --></div>
+
+        <div class="full">
+          <label class="field-label">Interests</label>
+          <input class="field-input" id="profileInterests" placeholder="e.g. travel, food, technology" />
+        </div>
+
+        <div class="full">
+          <label class="field-label">Learning Goal</label>
+          <input class="field-input" id="profileGoals" placeholder="e.g. prepare for a job interview" />
+        </div>
+
+        <button class="save-profile-btn" id="saveProfileBtn">Save Profile</button>
+      </div>
+    </details>
+
   </div>
 
-  <!-- Scrollable chat transcript -->
-  <div class="transcript-box" id="transcript">
-    <span class="empty-msg">Connect, then speak to start a conversation.</span>
-  </div>
 
-  <!-- Primary mic button + secondary actions -->
-  <div class="action-area">
-    <button class="mic-btn idle" id="micBtn">
-      <span class="mic-icon">🎙</span>
-      <span id="micBtnLabel">Connect &amp; Start Talking</span>
-    </button>
+  <!-- ══════════════════════════════════════════════════════════════════════ -->
+  <!-- SCREEN 2 — CHAT                                                        -->
+  <!-- ══════════════════════════════════════════════════════════════════════ -->
+  <div id="chatScreen" class="screen">
 
-    <div class="secondary-row">
-      <button class="sec-btn" id="disconnectBtn" disabled>Disconnect</button>
-      <button class="sec-btn" id="copyBtn">Copy transcript</button>
+    <!-- Back + title -->
+    <div class="chat-header">
+      <button class="back-btn" id="backBtn">← Back</button>
+      <h1>Realtime Voice Chat</h1>
     </div>
+
+    <!-- Language selector (disabled once connected) + live status dot -->
+    <div class="top-bar">
+      <div class="lang-group">
+        <label for="languageSelect">Language</label>
+        <select id="languageSelect">
+          <option value="English">English</option>
+          <option value="Spanish">Spanish</option>
+          <option value="French">French</option>
+          <option value="German">German</option>
+          <option value="Italian">Italian</option>
+          <option value="Portuguese">Portuguese</option>
+          <option value="Japanese">Japanese</option>
+          <option value="Korean">Korean</option>
+          <option value="Mandarin Chinese">Mandarin Chinese</option>
+          <option value="Arabic">Arabic</option>
+          <option value="Russian">Russian</option>
+          <option value="Dutch">Dutch</option>
+          <option value="Turkish">Turkish</option>
+          <option value="Hindi">Hindi</option>
+        </select>
+      </div>
+      <div class="status-bar">
+        <div class="dot" id="dot"></div>
+        <span id="statusText">Disconnected</span>
+      </div>
+    </div>
+
+    <!-- Scrollable chat transcript -->
+    <div class="transcript-box" id="transcript">
+      <span class="empty-msg">Connect, then speak to start a conversation.</span>
+    </div>
+
+    <!-- Primary mic button + secondary actions -->
+    <div class="action-area">
+      <button class="mic-btn idle" id="micBtn">
+        <span class="mic-icon">🎙</span>
+        <span id="micBtnLabel">Connect &amp; Start Talking</span>
+      </button>
+
+      <div class="secondary-row">
+        <button class="sec-btn" id="disconnectBtn" disabled>Disconnect</button>
+        <button class="sec-btn" id="copyBtn">Copy transcript</button>
+      </div>
+    </div>
+
+    <!-- Collapsible developer event log -->
+    <details>
+      <summary>Event log</summary>
+      <div class="log-box" id="logBox"></div>
+    </details>
   </div>
 
-  <!-- Collapsible developer event log -->
-  <details>
-    <summary>Event log</summary>
-    <div class="log-box" id="logBox"></div>
-  </details>
 
   <script>
     // ═══════════════════════════════════════════════════════════════════════
+    // USER IDENTITY
+    // Stable per-browser UUID stored in localStorage.
+    // Passed as a query param on every socket connection so Redis history
+    // is correctly namespaced across sessions.
+    // ═══════════════════════════════════════════════════════════════════════
+
+    function getUserId() {
+      let id = localStorage.getItem('langmate_user_id');
+      if (!id) {
+        id = crypto.randomUUID();
+        localStorage.setItem('langmate_user_id', id);
+      }
+      return id;
+    }
+
+    const USER_ID = getUserId();
+
+
+    // ═══════════════════════════════════════════════════════════════════════
     // APP STATE
     // ═══════════════════════════════════════════════════════════════════════
-    //
-    // The app moves through these states in sequence:
-    //
-    //   disconnected ──connect()──► idle ──startRecording()──► recording
-    //        ▲                                                      │
-    //        │                                              done_talking
-    //        │                                                      ▼
-    //        └──disconnect()──── idle ◄──response.done──── responding ◄── waiting
-    //
-    // States:
-    //   disconnected  No socket, no mic.  First-time state.
-    //   idle          Socket + OpenAI connected, session configured, ready.
-    //   recording     Mic streaming PCM to server.  "Done Talking" visible.
-    //   waiting       done_talking sent, awaiting response.created from OpenAI.
-    //   responding    AI is streaming audio+text.  Button disabled.
 
     let appState          = 'disconnected';
-    let socket            = null;     // Socket.IO socket instance
-    let audioCtx          = null;     // Web Audio API context (24 kHz)
-    let micStream         = null;     // MediaStream from getUserMedia
-    let workletNode       = null;     // AudioWorkletNode running PCMCapture
-    let isStreaming       = false;    // true while we should send PCM to server
-    let autoStartRecording = false;   // set before connect; triggers recording on session.updated
+    let socket            = null;
+    let audioCtx          = null;
+    let micStream         = null;
+    let workletNode       = null;
+    let isStreaming       = false;
+    let autoStartRecording = false;
 
-    // Playback queue state — ensures AI audio chunks play in order without gaps
-    let nextPlayTime  = 0;            // scheduled end time of the last queued chunk
-    let activeSources = [];           // AudioBufferSourceNodes currently playing
+    let nextPlayTime  = 0;
+    let activeSources = [];
 
-    // Partial DOM elements for in-progress turns (updated incrementally)
-    let partialUserEl = null;         // user bubble being filled by transcription deltas
-    let partialAiEl   = null;         // AI bubble being filled by audio transcript deltas
-    let lastAiEl      = null;         // last completed AI bubble (for audio player attachment)
+    let partialUserEl = null;
+    let partialAiEl   = null;
+    let lastAiEl      = null;
 
-    // Counters for high-frequency events we suppress individually in the log
-    let audioChunkCount      = 0;     // response.audio.delta chunks received this response
-    let transcriptDeltaCount = 0;     // response.audio_transcript.delta chunks received
+    let audioChunkCount      = 0;
+    let transcriptDeltaCount = 0;
 
 
     // ═══════════════════════════════════════════════════════════════════════
     // DOM REFERENCES
     // ═══════════════════════════════════════════════════════════════════════
+
+    const homeScreen     = document.getElementById('homeScreen');
+    const chatScreen     = document.getElementById('chatScreen');
+    const sessionListEl  = document.getElementById('sessionList');
+    const userIdRow      = document.getElementById('userIdRow');
+    const newConvBtn     = document.getElementById('newConvBtn');
+    const backBtn        = document.getElementById('backBtn');
+
+    // Profile form
+    const profileName      = document.getElementById('profileName');
+    const profileNativeLang = document.getElementById('profileNativeLang');
+    const profileLevel     = document.getElementById('profileLevel');
+    const profileInterests = document.getElementById('profileInterests');
+    const profileGoals     = document.getElementById('profileGoals');
+    const saveProfileBtn   = document.getElementById('saveProfileBtn');
 
     const micBtn         = document.getElementById('micBtn');
     const micBtnLabel    = document.getElementById('micBtnLabel');
@@ -283,15 +564,226 @@
 
 
     // ═══════════════════════════════════════════════════════════════════════
-    // EVENT LOG
+    // SCREEN NAVIGATION
+    // ═══════════════════════════════════════════════════════════════════════
+
+    function showScreen(name) {
+      homeScreen.classList.toggle('active', name === 'home');
+      chatScreen.classList.toggle('active', name === 'chat');
+    }
+
+    /**
+     * Navigate to the home screen, loading sessions.
+     * Disconnects any active socket connection first.
+     */
+    function goHome() {
+      if (socket) disconnect();
+      clearTranscript();
+      showScreen('home');
+      loadSessions();
+    }
+
+    /**
+     * Navigate to the chat screen, optionally pre-loading history.
+     *
+     * @param {object} opts
+     * @param {string} [opts.language]    - Pre-select language in the dropdown.
+     * @param {boolean} [opts.showHistory] - If true, fetch and render prior turns.
+     */
+    async function goChat(opts = {}) {
+      showScreen('chat');
+      clearTranscript();
+      logBox.innerHTML = '';
+
+      if (opts.language) {
+        languageSelect.value = opts.language;
+      }
+
+      if (opts.showHistory) {
+        await loadHistoryIntoTranscript();
+      }
+    }
+
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // HOME — SESSION LIST
+    // ═══════════════════════════════════════════════════════════════════════
+
+    /** Formats an ISO timestamp as a human-readable relative date. */
+    function formatDate(iso) {
+      if (!iso) return '';
+      const d     = new Date(iso);
+      const now   = new Date();
+      const diffMs = now - d;
+      const diffH  = diffMs / 3_600_000;
+      const diffD  = diffMs / 86_400_000;
+
+      if (diffH < 1)   return 'just now';
+      if (diffH < 24)  return `${Math.floor(diffH)}h ago`;
+      if (diffD < 7)   return `${Math.floor(diffD)}d ago`;
+      return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+    }
+
+    /**
+     * Fetches all sessions for this user from the REST API and renders
+     * them as cards in the session list on the home screen.
+     */
+    async function loadSessions() {
+      sessionListEl.innerHTML = '<div class="no-sessions">Loading…</div>';
+      userIdRow.textContent   = `User ID: ${USER_ID.slice(0, 8)}…`;
+
+      try {
+        const resp     = await fetch(`/api/sessions?userId=${encodeURIComponent(USER_ID)}`);
+        const sessions = await resp.json();
+
+        if (!sessions.length) {
+          sessionListEl.innerHTML = '<div class="no-sessions">No conversations yet — start one above.</div>';
+          return;
+        }
+
+        sessionListEl.innerHTML = '';
+
+        for (const s of sessions) {
+          const card       = document.createElement('div');
+          card.className   = 'session-card';
+
+          const turns      = Number(s.turnsCompleted ?? 0);
+          const turnLabel  = turns === 1 ? '1 turn' : `${turns} turns`;
+          const statusCls  = s.status === 'active' ? 'active' : 'ended';
+
+          card.innerHTML = `
+            <div class="session-meta">
+              <div class="session-lang">${escapeHtml(s.language ?? 'Unknown')}</div>
+              <div class="session-detail">
+                <span class="session-turns">${turnLabel}</span>
+                <span>${escapeHtml(formatDate(s.startedAt))}</span>
+                <span class="badge ${statusCls}">${s.status}</span>
+              </div>
+            </div>
+            <button class="resume-btn">Resume</button>
+          `;
+
+          card.querySelector('.resume-btn').addEventListener('click', (e) => {
+            e.stopPropagation();
+            goChat({ language: s.language, showHistory: true });
+          });
+
+          // Clicking the card itself also resumes
+          card.addEventListener('click', () => {
+            goChat({ language: s.language, showHistory: true });
+          });
+
+          sessionListEl.appendChild(card);
+        }
+      } catch (err) {
+        sessionListEl.innerHTML = '<div class="no-sessions">Could not load sessions.</div>';
+        console.error('loadSessions error:', err);
+      }
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // PROFILE — load and save
+    // ═══════════════════════════════════════════════════════════════════════
+
+    /** Fetches the stored profile and pre-fills the form fields. */
+    async function loadProfile() {
+      try {
+        const resp    = await fetch(`/api/profile?userId=${encodeURIComponent(USER_ID)}`);
+        const profile = await resp.json();
+        if (profile.name)           profileName.value        = profile.name;
+        if (profile.nativeLanguage) profileNativeLang.value  = profile.nativeLanguage;
+        if (profile.level)          profileLevel.value       = profile.level;
+        if (profile.interests)      profileInterests.value   = profile.interests;
+        if (profile.goals)          profileGoals.value       = profile.goals;
+
+        // Auto-open the section if the profile has no name yet (first-time setup hint)
+        if (!profile.name) document.getElementById('profileSection').open = true;
+      } catch {
+        // Silently ignore — profile is optional
+      }
+    }
+
+    saveProfileBtn.addEventListener('click', async () => {
+      const body = {
+        name:           profileName.value.trim(),
+        nativeLanguage: profileNativeLang.value.trim(),
+        level:          profileLevel.value,
+        interests:      profileInterests.value.trim(),
+        goals:          profileGoals.value.trim(),
+      };
+
+      try {
+        await fetch(`/api/profile?userId=${encodeURIComponent(USER_ID)}`, {
+          method: 'PUT', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        });
+        saveProfileBtn.textContent = 'Saved!';
+        saveProfileBtn.classList.add('saved');
+        setTimeout(() => {
+          saveProfileBtn.textContent = 'Save Profile';
+          saveProfileBtn.classList.remove('saved');
+        }, 2_000);
+      } catch (err) {
+        console.error('Profile save failed:', err);
+      }
+    });
+
+    /** Escapes HTML special characters to prevent injection. */
+    function escapeHtml(str) {
+      return String(str)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
+    }
+
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // CHAT — HISTORY CONTEXT
     // ═══════════════════════════════════════════════════════════════════════
 
     /**
-     * Appends a timestamped line to the developer event log panel.
-     *
-     * @param {string} msg  - Message text.
-     * @param {'info'|'in'|'warn'|'err'|'dim'} kind - CSS class for colour.
+     * Fetches the last 10 turns for this user and renders them in the
+     * transcript box as dimmed "previous session" bubbles followed by a divider.
      */
+    async function loadHistoryIntoTranscript() {
+      try {
+        const resp  = await fetch(`/api/history?userId=${encodeURIComponent(USER_ID)}&limit=10`);
+        const turns = await resp.json();
+
+        if (!turns.length) return;
+
+        clearEmpty();
+
+        for (const turn of turns) {
+          const role = turn.role === 'user' ? 'user' : 'assistant';
+          const el   = appendTurn(role, turn.text);
+          el.classList.add('history');
+        }
+
+        // Separator between past context and the new session
+        const divider       = document.createElement('div');
+        divider.className   = 'history-divider';
+        divider.textContent = '── new session ──';
+        transcriptEl.appendChild(divider);
+
+        transcriptEl.scrollTop = transcriptEl.scrollHeight;
+      } catch (err) {
+        console.warn('Could not load history:', err.message);
+      }
+    }
+
+    /** Resets the transcript box to its initial empty state. */
+    function clearTranscript() {
+      transcriptEl.innerHTML = '<span class="empty-msg">Connect, then speak to start a conversation.</span>';
+      setState('disconnected');
+    }
+
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // EVENT LOG
+    // ═══════════════════════════════════════════════════════════════════════
+
     function log(msg, kind = 'info') {
       const el = document.createElement('div');
       el.className = `ll ${kind}`;
@@ -305,12 +797,6 @@
     // STATE MACHINE
     // ═══════════════════════════════════════════════════════════════════════
 
-    /**
-     * Transitions to a new app state, updating all UI elements accordingly.
-     * Single source of truth for button labels, dot colour, and enabled states.
-     *
-     * @param {'disconnected'|'idle'|'recording'|'waiting'|'responding'} state
-     */
     function setState(state) {
       appState = state;
       micBtn.className = 'mic-btn';
@@ -367,19 +853,10 @@
     // TRANSCRIPT DOM HELPERS
     // ═══════════════════════════════════════════════════════════════════════
 
-    /** Removes the placeholder "Connect to start" message on first turn. */
     function clearEmpty() {
       transcriptEl.querySelector('.empty-msg')?.remove();
     }
 
-    /**
-     * Creates and appends a new chat bubble element.
-     *
-     * @param {'user'|'assistant'} role
-     * @param {string} text    - Initial text content (may be empty for partial).
-     * @param {boolean} partial - If true, adds the .partial faded style.
-     * @returns {HTMLElement}  The created turn div (held to update incrementally).
-     */
     function appendTurn(role, text = '', partial = false) {
       clearEmpty();
       const el  = document.createElement('div');
@@ -398,56 +875,43 @@
       return el;
     }
 
-    /** Returns the text <span> inside a turn element. */
     function bodyOf(el) { return el.querySelector('span'); }
 
 
     // ═══════════════════════════════════════════════════════════════════════
-    // AUDIO PLAYBACK  (streams AI audio in real time)
+    // AUDIO PLAYBACK
     // ═══════════════════════════════════════════════════════════════════════
 
-    /** Stops all currently scheduled audio sources and resets the play clock. */
     function stopPlayback() {
       activeSources.forEach(s => { try { s.stop(0); } catch {} });
       activeSources = [];
       if (audioCtx) nextPlayTime = audioCtx.currentTime;
     }
 
-    /**
-     * Decodes a base64 PCM16 LE chunk and schedules it for gapless playback.
-     *
-     * OpenAI streams audio as many small PCM16 chunks.  We schedule each one
-     * to start exactly where the previous one ended, achieving gapless output.
-     *
-     * @param {string} base64 - Base64-encoded PCM16 LE 24 kHz mono chunk.
-     */
     function playPcmDelta(base64) {
       if (!audioCtx || !base64) return;
 
-      // Decode base64 → binary → Uint8Array
       const binary = atob(base64);
       const bytes  = new Uint8Array(binary.length);
       for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
 
-      const samples = bytes.length / 2; // 16-bit = 2 bytes per sample
+      const samples = bytes.length / 2;
       if (samples === 0) return;
 
-      // Convert PCM16 signed integers to normalised float32 (range -1..1)
       const buf = audioCtx.createBuffer(1, samples, 24_000);
       const ch  = buf.getChannelData(0);
       const dv  = new DataView(bytes.buffer);
       for (let i = 0; i < samples; i++) {
-        ch[i] = dv.getInt16(i * 2, true /* little-endian */) / 32_767;
+        ch[i] = dv.getInt16(i * 2, true) / 32_767;
       }
 
-      // Schedule this chunk to play immediately after the previous one
       const src = audioCtx.createBufferSource();
       src.buffer = buf;
       src.connect(audioCtx.destination);
       src.onended = () => { activeSources = activeSources.filter(s => s !== src); };
 
       const now = audioCtx.currentTime;
-      if (nextPlayTime < now) nextPlayTime = now + 0.04; // small safety buffer
+      if (nextPlayTime < now) nextPlayTime = now + 0.04;
       src.start(nextPlayTime);
       nextPlayTime += buf.duration;
       activeSources.push(src);
@@ -455,44 +919,26 @@
 
 
     // ═══════════════════════════════════════════════════════════════════════
-    // AUDIO CAPTURE  (streams user mic to server via AudioWorklet)
+    // AUDIO CAPTURE
     // ═══════════════════════════════════════════════════════════════════════
 
-    /**
-     * AudioWorklet processor source.
-     *
-     * Runs in a dedicated audio thread.  Receives 128-sample float32 blocks
-     * from the microphone and posts them to the main thread via MessagePort.
-     *
-     * Loaded dynamically via a Blob URL so we don't need a separate JS file.
-     */
     const WORKLET_SRC = `
 class PCMCapture extends AudioWorkletProcessor {
   process(inputs) {
     const ch = inputs[0]?.[0];
-    // Only post if there is actual audio data in this block
     if (ch && ch.length > 0) this.port.postMessage(ch.slice());
-    return true; // keep processor alive
+    return true;
   }
 }
 registerProcessor('pcm-capture', PCMCapture);
 `;
 
-    /**
-     * Converts a Float32Array of audio samples to a base64-encoded PCM16 LE string.
-     *
-     * OpenAI expects PCM16 little-endian signed 16-bit samples.
-     * We clamp each sample to [-1, 1] then multiply by 32767 to get int16 range.
-     *
-     * @param {Float32Array} f32 - Audio samples in [-1, 1] range.
-     * @returns {string} Base64-encoded PCM16 LE audio.
-     */
     function f32ToBase64Pcm16(f32) {
       const buf  = new ArrayBuffer(f32.length * 2);
       const view = new DataView(buf);
       for (let i = 0; i < f32.length; i++) {
         const s = Math.max(-1, Math.min(1, f32[i]));
-        view.setInt16(i * 2, s * 32_767, true /* little-endian */);
+        view.setInt16(i * 2, s * 32_767, true);
       }
       let bin = '';
       const bytes = new Uint8Array(buf);
@@ -500,26 +946,13 @@ registerProcessor('pcm-capture', PCMCapture);
       return btoa(bin);
     }
 
-    /**
-     * Requests microphone access, creates an AudioContext at 24 kHz, and starts
-     * the PCMCapture AudioWorklet.
-     *
-     * The worklet runs continuously once started; PCM is only forwarded to the
-     * server when `isStreaming` is true (i.e., while the user is recording).
-     */
     async function initMic() {
       micStream = await navigator.mediaDevices.getUserMedia({
-        audio: {
-          sampleRate: 24_000,
-          channelCount: 1,
-          echoCancellation: true,
-          noiseSuppression: true,
-        },
+        audio: { sampleRate: 24_000, channelCount: 1, echoCancellation: true, noiseSuppression: true },
       });
 
       audioCtx = new AudioContext({ sampleRate: 24_000 });
 
-      // Load the worklet processor from a Blob URL (avoids needing a separate file)
       const blob    = new Blob([WORKLET_SRC], { type: 'application/javascript' });
       const blobUrl = URL.createObjectURL(blob);
       await audioCtx.audioWorklet.addModule(blobUrl);
@@ -531,27 +964,15 @@ registerProcessor('pcm-capture', PCMCapture);
       let workletTicks = 0;
       workletNode.port.onmessage = (e) => {
         workletTicks++;
-
-        // Log the first tick to confirm the worklet is actually running
         if (workletTicks === 1) log('Audio worklet active ✓');
-
-        // Only forward PCM to the server while we are in recording state
         if (!isStreaming || !socket) return;
-
-        socket.emit('message', {
-          type:  'input_audio_buffer.append',
-          audio: f32ToBase64Pcm16(e.data),
-        });
+        socket.emit('message', { type: 'input_audio_buffer.append', audio: f32ToBase64Pcm16(e.data) });
       };
 
       source.connect(workletNode);
       log('Mic initialised at 24 kHz');
     }
 
-    /**
-     * Tears down all audio resources: stops the worklet, mic tracks, and closes
-     * the AudioContext.  Safe to call even if initMic() was never completed.
-     */
     function teardownMic() {
       isStreaming = false;
       workletNode?.disconnect(); workletNode = null;
@@ -565,47 +986,20 @@ registerProcessor('pcm-capture', PCMCapture);
     // OPENAI / SERVER EVENT HANDLER
     // ═══════════════════════════════════════════════════════════════════════
 
-    /**
-     * Handles all events received from the server via Socket.IO.
-     *
-     * The server forwards every OpenAI Realtime API event plus two custom events:
-     *   • ai_audio_ready  — AI WAV file is saved; URL provided for <audio> element.
-     *
-     * Event flow for a single turn:
-     *   session.created → session.updated
-     *   (user speaks) → input_audio_buffer.* → conversation.item.*
-     *   → response.created → response.audio.delta (×N) → response.audio.done
-     *   → response.audio_transcript.delta (×N) → response.audio_transcript.done
-     *   → response.done → ai_audio_ready
-     *
-     * @param {object} ev - Parsed JSON event from the server.
-     */
     function onEvent(ev) {
       const t = ev.type;
 
-      // ── Logging ──────────────────────────────────────────────────────────
-      // High-frequency delta events (audio chunks, transcript deltas) are
-      // counted silently and summarised in their corresponding "done" event.
       if (t === 'response.audio.delta') {
         audioChunkCount++;
-        // Fall through to playback handler — no log line for individual chunks
       } else if (t === 'response.audio_transcript.delta') {
         transcriptDeltaCount++;
-        // Fall through to text handler — no log line for individual deltas
       } else {
         log(`← ${t}`, 'in');
       }
 
-      // ── Session lifecycle ─────────────────────────────────────────────────
-
-      if (t === 'session.created') {
-        // Server will now send session.update to configure the OpenAI session
-        return;
-      }
+      if (t === 'session.created') return;
 
       if (t === 'session.updated') {
-        // Session is fully configured.  If autoStartRecording is set (user clicked
-        // "Connect & Start Talking"), begin recording immediately.
         if (autoStartRecording) {
           autoStartRecording = false;
           startRecording();
@@ -613,18 +1007,12 @@ registerProcessor('pcm-capture', PCMCapture);
         return;
       }
 
-      // ── User speech transcription ─────────────────────────────────────────
-      // With turn_detection: null, these events fire AFTER input_audio_buffer.commit,
-      // not during recording.  The partial bubble is pre-created in startRecording().
-
       if (t === 'input_audio_buffer.speech_started') {
-        // Only fires if turn_detection is enabled (not used in manual mode)
         if (!partialUserEl) partialUserEl = appendTurn('user', '', true);
         return;
       }
 
       if (t === 'conversation.item.input_audio_transcription.delta') {
-        // Incremental transcription of the user's speech (fires post-commit)
         if (!partialUserEl) partialUserEl = appendTurn('user', '', true);
         bodyOf(partialUserEl).textContent += ev.delta ?? '';
         transcriptEl.scrollTop = transcriptEl.scrollHeight;
@@ -632,7 +1020,6 @@ registerProcessor('pcm-capture', PCMCapture);
       }
 
       if (t === 'conversation.item.input_audio_transcription.completed') {
-        // Final transcription — overwrite any partial text with the clean result
         if (!partialUserEl) partialUserEl = appendTurn('user', '', true);
         partialUserEl.classList.remove('partial');
         bodyOf(partialUserEl).textContent = ev.transcript ?? '';
@@ -641,32 +1028,24 @@ registerProcessor('pcm-capture', PCMCapture);
         return;
       }
 
-      // ── AI response ───────────────────────────────────────────────────────
-
       if (t === 'response.created') {
-        // A new response is starting — create the AI bubble and enter responding state
         setState('responding');
         if (!partialAiEl) partialAiEl = appendTurn('assistant', '', true);
         return;
       }
 
       if (t === 'response.audio.delta') {
-        // Stream audio chunk to the speaker for real-time playback
         playPcmDelta(ev.delta);
         return;
       }
 
       if (t === 'response.audio.done') {
-        // All audio chunks received for this response
         log(`  audio streaming complete (${audioChunkCount} chunks)`, 'info');
         audioChunkCount = 0;
         return;
       }
 
       if (t === 'response.audio_transcript.delta') {
-        // Incremental transcript of the AI's speech — update the bubble in real time.
-        // Both response.audio_transcript.delta and response.text.delta may fire;
-        // response.audio_transcript.done will overwrite with the final clean text.
         if (!partialAiEl) partialAiEl = appendTurn('assistant', '', true);
         bodyOf(partialAiEl).textContent += ev.delta ?? '';
         transcriptEl.scrollTop = transcriptEl.scrollHeight;
@@ -674,8 +1053,6 @@ registerProcessor('pcm-capture', PCMCapture);
       }
 
       if (t === 'response.text.delta') {
-        // Text modality delta — same content as audio_transcript.delta in most cases.
-        // Handled as a fallback in case audio_transcript.delta doesn't fire.
         if (!partialAiEl) partialAiEl = appendTurn('assistant', '', true);
         bodyOf(partialAiEl).textContent += ev.delta ?? '';
         transcriptEl.scrollTop = transcriptEl.scrollHeight;
@@ -683,21 +1060,16 @@ registerProcessor('pcm-capture', PCMCapture);
       }
 
       if (t === 'response.audio_transcript.done') {
-        // Final transcript — overwrite the bubble to correct any duplicates from
-        // both delta event types firing simultaneously.
         log(`  transcript complete (${transcriptDeltaCount} deltas)`, 'info');
         transcriptDeltaCount = 0;
-        if (partialAiEl && ev.transcript) {
-          bodyOf(partialAiEl).textContent = ev.transcript;
-        }
+        if (partialAiEl && ev.transcript) bodyOf(partialAiEl).textContent = ev.transcript;
         return;
       }
 
       if (t === 'response.done') {
-        // Response is complete — finalise the AI bubble and return to idle
         if (partialAiEl) {
           partialAiEl.classList.remove('partial');
-          lastAiEl   = partialAiEl; // keep reference for the upcoming ai_audio_ready
+          lastAiEl    = partialAiEl;
           partialAiEl = null;
         }
         if (partialUserEl) {
@@ -708,11 +1080,42 @@ registerProcessor('pcm-capture', PCMCapture);
         return;
       }
 
-      // ── Custom server events ──────────────────────────────────────────────
+      // ── §3b Tool calling events ───────────────────────────────────────────
+
+      if (t === 'response.output_item.added') {
+        // AI decided to call a function — show a transient indicator in the bubble
+        const item = ev.item;
+        if (item?.type === 'function_call') {
+          if (!partialAiEl) partialAiEl = appendTurn('assistant', '', true);
+          bodyOf(partialAiEl).innerHTML =
+            `<em style="color:#555;font-style:italic">Calling ${escapeHtml(item.name)}…</em>`;
+          log(`[tool] calling ${item.name}`, 'info');
+        }
+        return;
+      }
+
+      if (t === 'tool_call_complete') {
+        // Server executed the tool — clear the "Calling…" indicator so the
+        // AI's spoken response streams cleanly into the bubble
+        if (partialAiEl) bodyOf(partialAiEl).textContent = '';
+        log(`[tool] ${ev.toolName} complete`, 'info');
+        return;
+      }
+
+      if (t === 'history_injected') {
+        // Server signals that history items have been injected into OpenAI's context.
+        // If the transcript already has a history divider (from loadHistoryIntoTranscript),
+        // update it with the exact count.  For new sessions (no visible bubbles),
+        // just log it — the memory is silent but present in the AI's context.
+        const divider = transcriptEl.querySelector('.history-divider');
+        if (divider && ev.count > 0) {
+          divider.textContent = `── ${ev.count} turn${ev.count !== 1 ? 's' : ''} from history · new session ──`;
+        }
+        log(`[history] ${ev.count} turn(s) injected into AI context`, 'info');
+        return;
+      }
 
       if (t === 'ai_audio_ready') {
-        // The server has saved the AI's audio as a WAV and provides a URL.
-        // Append an <audio> player to the last AI bubble so the user can replay it.
         if (lastAiEl && ev.url) {
           const audio     = document.createElement('audio');
           audio.controls  = true;
@@ -724,14 +1127,72 @@ registerProcessor('pcm-capture', PCMCapture);
         return;
       }
 
-      // ── Errors ────────────────────────────────────────────────────────────
+      if (t === 'turn_feedback') {
+        const fb = ev.feedback;
+        if (!fb) return;
+
+        const score  = Math.max(1, Math.min(10, Number(fb.fluency_score) || 5));
+        const errors = Array.isArray(fb.grammar_errors) ? fb.grammar_errors : [];
+        const tip    = typeof fb.tip === 'string' ? fb.tip.trim() : '';
+
+        // Fluency bar colour: red → yellow → green
+        const hue   = Math.round((score - 1) / 9 * 120); // 0 = red, 120 = green
+        const color = `hsl(${hue}, 70%, 45%)`;
+
+        const card = document.createElement('div');
+        card.className = 'feedback-card';
+
+        let html = `
+          <div class="feedback-header">
+            <span>Feedback</span>
+          </div>
+          <div class="fluency-row">
+            <span class="fluency-label">Fluency</span>
+            <div class="fluency-track">
+              <div class="fluency-fill" style="width:${score * 10}%;background:${color}"></div>
+            </div>
+            <span class="fluency-score">${score}/10</span>
+          </div>
+        `;
+
+        if (errors.length > 0) {
+          html += `<div class="grammar-errors">`;
+          for (const err of errors) {
+            html += `
+              <div class="grammar-error">
+                <span class="err-original">${escapeHtml(err.original ?? '')}</span>
+                <span class="err-arrow">→</span>
+                <span class="err-suggestion">${escapeHtml(err.suggestion ?? '')}</span>
+                <span class="err-rule">${escapeHtml(err.rule ?? '')}</span>
+              </div>
+            `;
+          }
+          html += `</div>`;
+        }
+
+        if (tip) {
+          html += `<div class="feedback-tip">${escapeHtml(tip)}</div>`;
+        }
+
+        card.innerHTML = html;
+
+        // Insert after lastAiEl (or at end of transcript if no AI bubble)
+        const anchor = lastAiEl ?? null;
+        if (anchor && anchor.nextSibling) {
+          transcriptEl.insertBefore(card, anchor.nextSibling);
+        } else {
+          transcriptEl.appendChild(card);
+        }
+        transcriptEl.scrollTop = transcriptEl.scrollHeight;
+
+        log(`[feedback] score=${score} errors=${errors.length}`, 'info');
+        return;
+      }
 
       if (t === 'error') {
         log(`error: ${ev.error?.message ?? JSON.stringify(ev.error)}`, 'err');
         return;
       }
-
-      // Any other event from OpenAI (rate_limits.updated, etc.) — already logged above
     }
 
 
@@ -739,14 +1200,6 @@ registerProcessor('pcm-capture', PCMCapture);
     // RECORDING CONTROL
     // ═══════════════════════════════════════════════════════════════════════
 
-    /**
-     * Transitions from idle to recording state.
-     *
-     * Sets isStreaming = true so the AudioWorklet starts forwarding PCM to the
-     * server, creates a new partial user bubble, and updates the UI.
-     *
-     * Guard: no-op if appState is not 'idle' (prevents double-start).
-     */
     function startRecording() {
       if (appState !== 'idle') return;
       isStreaming   = true;
@@ -760,22 +1213,10 @@ registerProcessor('pcm-capture', PCMCapture);
     // CONNECTION MANAGEMENT
     // ═══════════════════════════════════════════════════════════════════════
 
-    /**
-     * Requests mic access, creates a Socket.IO connection, and sets
-     * autoStartRecording so recording begins automatically on session.updated.
-     *
-     * Connection sequence:
-     *   1. getUserMedia (mic access)
-     *   2. io() → Socket.IO connect
-     *   3. socket.on('connect') → setState('idle')
-     *   4. OpenAI session.created → server sends session.update
-     *   5. session.updated → startRecording() (via autoStartRecording)
-     */
     async function connect() {
       micBtn.disabled        = true;
       statusText.textContent = 'Requesting mic…';
 
-      // Request microphone access first — fail fast if denied
       try {
         await initMic();
       } catch (err) {
@@ -789,21 +1230,20 @@ registerProcessor('pcm-capture', PCMCapture);
 
       const language = languageSelect.value;
       languageSelect.disabled = true;
-      log(`Connecting  language=${language}`);
+      log(`Connecting  language=${language}  userId=${USER_ID.slice(0, 8)}…`);
 
-      // Set flag before creating the socket so we don't miss session.updated
       autoStartRecording = true;
 
-      // Connect to the Socket.IO namespace; pass language as a query param
-      // so the server can configure the OpenAI session before the first event.
-      socket = io({ path: '/voice-chat/rt', query: { language } });
+      // Pass both language and userId so the server can:
+      //   • Configure the OpenAI session in the right language
+      //   • Inject prior conversation history from Redis
+      socket = io({ path: '/voice-chat/rt', query: { language, userId: USER_ID } });
 
       socket.on('connect', () => {
         log(`Socket connected  id=${socket.id}`, 'in');
         setState('idle');
       });
 
-      // All OpenAI events (plus custom server events) arrive on 'message'
       socket.on('message', onEvent);
 
       socket.on('connect_error', (err) => {
@@ -821,17 +1261,12 @@ registerProcessor('pcm-capture', PCMCapture);
         languageSelect.disabled = false;
         teardownMic();
         stopPlayback();
-        // Clear in-progress bubbles so the next session starts clean
         partialUserEl = null;
         partialAiEl   = null;
         lastAiEl      = null;
       });
     }
 
-    /**
-     * Disconnects the socket and tears down all audio resources.
-     * Safe to call from any state.
-     */
     function disconnect() {
       socket?.disconnect();
       socket = null;
@@ -846,30 +1281,19 @@ registerProcessor('pcm-capture', PCMCapture);
 
 
     // ═══════════════════════════════════════════════════════════════════════
-    // MIC BUTTON — primary interaction
+    // BUTTON HANDLERS
     // ═══════════════════════════════════════════════════════════════════════
 
-    /**
-     * Single button drives the full interaction lifecycle:
-     *
-     *   disconnected  → connect() + autoStartRecording
-     *   idle          → startRecording()
-     *   recording     → send done_talking, transition to waiting
-     *   waiting/responding → disabled (no-op)
-     */
-    micBtn.addEventListener('click', async () => {
-      if (appState === 'disconnected') {
-        await connect();
-        return;
-      }
+    // Home screen
+    newConvBtn.addEventListener('click', () => goChat({ showHistory: false }));
+    backBtn.addEventListener('click', goHome);
 
-      if (appState === 'idle') {
-        startRecording();
-        return;
-      }
+    // Mic button — drives the full interaction lifecycle
+    micBtn.addEventListener('click', async () => {
+      if (appState === 'disconnected') { await connect(); return; }
+      if (appState === 'idle')         { startRecording(); return; }
 
       if (appState === 'recording') {
-        // Stop streaming PCM and tell the server the user is done
         isStreaming = false;
         log('→ done_talking sent', 'warn');
         socket.emit('message', { type: 'done_talking' });
@@ -880,17 +1304,8 @@ registerProcessor('pcm-capture', PCMCapture);
 
     disconnectBtn.addEventListener('click', disconnect);
 
-
-    // ═══════════════════════════════════════════════════════════════════════
-    // COPY TRANSCRIPT
-    // ═══════════════════════════════════════════════════════════════════════
-
-    /**
-     * Copies the visible conversation transcript to the clipboard as plain text.
-     * Ignores empty bubbles and partial (in-progress) turns.
-     */
     copyBtn.addEventListener('click', () => {
-      const turns = transcriptEl.querySelectorAll('.turn');
+      const turns = transcriptEl.querySelectorAll('.turn:not(.history)');
       if (!turns.length) return;
 
       const lines = [];
@@ -909,6 +1324,15 @@ registerProcessor('pcm-capture', PCMCapture);
         }, 2_000);
       });
     });
+
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // INIT
+    // ═══════════════════════════════════════════════════════════════════════
+
+    loadSessions();
+    loadProfile();
+
   </script>
 </body>
 </html>

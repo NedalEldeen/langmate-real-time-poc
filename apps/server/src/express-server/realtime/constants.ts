@@ -22,7 +22,26 @@ export const OPENAI_REALTIME_URL =
  *
  * File layout:
  *   data/
- *     recordings/   ← user WAVs (_userN.wav) + AI WAVs (_aiN.wav)
- *     transcripts/  ← per-session .txt conversation logs
+ *     recordings/        ← user WAVs (_userN.wav) + AI WAVs (_aiN.wav)
+ *     recordings/.tmp/   ← in-flight PCM chunks (.pcm.tmp) — crash-safe buffer
+ *     transcripts/       ← per-session .txt conversation logs
  */
 export const DATA_DIR = path.join(__dirname, "../../../data");
+
+/**
+ * Staging area for in-flight PCM audio.
+ *
+ * Each active turn writes chunks here as `<sessionTs>_<shortId>_<type><N>.pcm.tmp`.
+ * On turn end the file is converted to WAV and moved to recordings/.
+ * On server restart any surviving .pcm.tmp files are recovered automatically.
+ */
+export const TMP_DIR = path.join(DATA_DIR, "recordings", ".tmp");
+
+/**
+ * How many recent turns to inject verbatim into each new session.
+ *
+ * Older turns are represented by a rolling summary (see session-summarizer.ts).
+ * 6 turns = 3 full exchanges (user + AI), which covers the immediate prior context
+ * without excessive token cost.
+ */
+export const HISTORY_INJECTION_TURNS = 6;

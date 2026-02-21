@@ -1,19 +1,32 @@
 /**
- * AudioRecorder — accumulates and persists PCM audio for a single session.
+ * AudioRecorder — crash-safe PCM audio capture for a single session.
+ *
+ * ── Why temp files? ───────────────────────────────────────────────────────
+ *
+ * Previous design: PCM chunks were accumulated in memory (Buffer[]) and
+ * written to WAV only when a turn completed.  A server crash mid-turn meant
+ * all in-flight audio was lost.
+ *
+ * New design: each chunk is immediately appended to a `.pcm.tmp` file on disk
+ * using `fs.appendFileSync`.  On turn end the temp file is read, wrapped in a
+ * WAV header, and moved to the final recordings directory.  On server restart,
+ * any surviving `.pcm.tmp` files represent incomplete turns that can be
+ * recovered automatically (see recoverTempFiles()).
  *
  * Tracks two separate audio streams per session:
- *   • User audio  — PCM16 chunks received from the browser via Socket.IO,
- *                   flushed and saved when the user clicks "Done Talking".
- *   • AI audio    — PCM16 chunks received from OpenAI via `response.audio.delta`,
- *                   flushed and saved when `response.done` fires.
+ *   • User audio  — PCM16 chunks from the browser (input_audio_buffer.append)
+ *   • AI audio    — PCM16 chunks from OpenAI (response.audio.delta)
  *
- * Both are saved as standard WAV files under data/recordings/.
- * File naming: <sessionTs>_<shortId>_user<N>.wav  /  _ai<N>.wav
+ * File locations:
+ *   data/recordings/.tmp/<sessionTs>_<shortId>_user<N>.pcm.tmp  (in-flight)
+ *   data/recordings/.tmp/<sessionTs>_<shortId>_ai<N>.pcm.tmp    (in-flight)
+ *   data/recordings/<sessionTs>_<shortId>_user<N>.wav           (completed)
+ *   data/recordings/<sessionTs>_<shortId>_ai<N>.wav             (completed)
  */
 
-import fs from "fs";
+import fs   from "fs";
 import path from "path";
-import { DATA_DIR } from "./constants";
+import { DATA_DIR, TMP_DIR } from "./constants";
 import { pcmToWav } from "./pcm-utils";
 
 /** Ensures a directory exists, creating it (and parents) if necessary. */
@@ -22,11 +35,14 @@ function ensureDir(dir: string): void {
 }
 
 export class AudioRecorder {
-  /** Accumulated raw PCM chunks for the current user speech turn. */
-  private userChunks: Buffer[] = [];
+  /** Absolute path of the active user-turn temp file, or null between turns. */
+  private userTmpPath: string | null = null;
 
-  /** Accumulated raw PCM chunks for the current AI response turn. */
-  private aiChunks: Buffer[] = [];
+  /** Absolute path of the active AI-turn temp file, or null between turns. */
+  private aiTmpPath: string | null = null;
+
+  /** How many user chunks have been written to the current temp file. */
+  private userChunkCount_ = 0;
 
   /** Counter incremented each time user audio is saved (turn 1, 2, …). */
   private userTurnIndex = 0;
@@ -40,103 +56,181 @@ export class AudioRecorder {
    */
   constructor(
     private readonly sessionTs: string,
-    private readonly shortId: string,
+    private readonly shortId:   string,
   ) {}
 
   // ── User audio ────────────────────────────────────────────────────────────
 
   /**
-   * Buffers one chunk of user PCM audio sent from the browser.
+   * Appends one user PCM chunk to the current temp file.
    *
-   * The browser sends base64-encoded PCM16 LE 24 kHz mono chunks via
-   * `input_audio_buffer.append` events.  We decode and buffer them here so
-   * we can reconstruct the full audio when the turn ends.
+   * Opens the temp file on the very first chunk of each turn.
+   * Using appendFileSync keeps the implementation simple and guarantees that
+   * each chunk is on disk before the next one arrives.
    *
-   * @param base64 - Base64-encoded PCM16 audio chunk.
+   * @param base64 - Base64-encoded PCM16 audio chunk from the browser.
    */
   appendUserChunk(base64: string): void {
     const chunk = Buffer.from(base64, "base64");
-    this.userChunks.push(chunk);
 
-    // Log only on the first chunk so we know audio is flowing without noise
-    if (this.userChunks.length === 1) {
-      console.log(`[audio] first user chunk received (${chunk.length} bytes)`);
+    if (!this.userTmpPath) {
+      ensureDir(TMP_DIR);
+      this.userTmpPath = path.join(
+        TMP_DIR,
+        `${this.sessionTs}_${this.shortId}_user${this.userTurnIndex + 1}.pcm.tmp`,
+      );
+      this.userChunkCount_ = 0;
+      console.log(`[audio] user tmp opened → ${path.basename(this.userTmpPath)}`);
+    }
+
+    fs.appendFileSync(this.userTmpPath, chunk);
+    this.userChunkCount_++;
+
+    if (this.userChunkCount_ === 1) {
+      console.log(`[audio] first user chunk written (${chunk.length} bytes)`);
     }
   }
 
   /**
-   * Buffers one chunk of AI audio received from OpenAI.
+   * Appends one AI PCM chunk to the current temp file.
    *
-   * OpenAI streams audio via `response.audio.delta` events, each containing
-   * a base64-encoded PCM16 chunk.  These are accumulated here and flushed
-   * to disk when the response is complete.
-   *
-   * @param base64 - Base64-encoded PCM16 audio chunk.
+   * @param base64 - Base64-encoded PCM16 audio chunk from OpenAI.
    */
   appendAiChunk(base64: string): void {
-    this.aiChunks.push(Buffer.from(base64, "base64"));
+    const chunk = Buffer.from(base64, "base64");
+
+    if (!this.aiTmpPath) {
+      ensureDir(TMP_DIR);
+      this.aiTmpPath = path.join(
+        TMP_DIR,
+        `${this.sessionTs}_${this.shortId}_ai${this.aiTurnIndex + 1}.pcm.tmp`,
+      );
+      console.log(`[audio] ai tmp opened → ${path.basename(this.aiTmpPath)}`);
+    }
+
+    fs.appendFileSync(this.aiTmpPath, chunk);
   }
 
   /**
-   * Flushes all accumulated user audio chunks to a WAV file.
+   * Finalises the current user turn: reads the temp file, wraps it in a WAV
+   * header, writes the final WAV, and deletes the temp file.
    *
    * Called when the user clicks "Done Talking" (done_talking event).
-   * The chunks are cleared so the next turn starts fresh.
    *
-   * @returns The saved filename (without directory), or null if no audio.
+   * @returns The saved filename (basename only), or null if no audio was recorded.
    */
   saveUserAudio(): string | null {
-    return this.flush(this.userChunks, "user", () => ++this.userTurnIndex);
+    const tmp = this.userTmpPath;
+    this.userTmpPath    = null;
+    this.userChunkCount_ = 0;
+    return this.finaliseTmp(tmp, "user", ++this.userTurnIndex);
   }
 
   /**
-   * Flushes all accumulated AI audio chunks to a WAV file.
+   * Finalises the current AI turn: reads the temp file, wraps it in a WAV
+   * header, writes the final WAV, and deletes the temp file.
    *
    * Called when `response.done` fires from OpenAI.
-   * The chunks are cleared so the next response starts fresh.
    *
-   * @returns The saved filename (without directory), or null if no audio.
+   * @returns The saved filename (basename only), or null if no audio was recorded.
    */
   saveAiAudio(): string | null {
-    return this.flush(this.aiChunks, "ai", () => ++this.aiTurnIndex);
+    const tmp = this.aiTmpPath;
+    this.aiTmpPath = null;
+    return this.finaliseTmp(tmp, "ai", ++this.aiTurnIndex);
   }
 
-  /** How many user PCM chunks are currently buffered (useful for diagnostics). */
+  /** How many user PCM chunks are in the current temp file (useful for diagnostics). */
   get userChunkCount(): number {
-    return this.userChunks.length;
+    return this.userChunkCount_;
   }
 
   // ── Private ───────────────────────────────────────────────────────────────
 
   /**
-   * Generic flush helper.  Drains `chunks` in-place, converts to WAV, and
-   * writes to disk.  Returns the filename on success, null otherwise.
+   * Reads `tmpPath`, prepends a WAV header, writes the final file, and removes
+   * the temp file.  Returns the final filename or null on any error / empty file.
    */
-  private flush(
-    chunks: Buffer[],
-    label: "user" | "ai",
-    nextIndex: () => number,
+  private finaliseTmp(
+    tmpPath:  string | null,
+    label:    "user" | "ai",
+    turnIndex: number,
   ): string | null {
-    // Drain the array atomically so concurrent flushes don't double-save
-    const drained = chunks.splice(0);
-
-    if (drained.length === 0) {
-      console.log(`[audio] save${label === "user" ? "User" : "Ai"}Audio: no chunks — skipping`);
+    if (!tmpPath) {
+      console.log(`[audio] save${label === "user" ? "User" : "Ai"}Audio: no tmp file — skipping`);
       return null;
     }
 
     try {
-      const dir = path.join(DATA_DIR, "recordings");
+      const pcmData = fs.readFileSync(tmpPath);
+
+      if (pcmData.length === 0) {
+        fs.unlinkSync(tmpPath);
+        console.log(`[audio] ${label} tmp file was empty — deleted`);
+        return null;
+      }
+
+      const dir      = path.join(DATA_DIR, "recordings");
       ensureDir(dir);
 
-      const idx      = nextIndex();
-      const filename = `${this.sessionTs}_${this.shortId}_${label}${idx}.wav`;
-      fs.writeFileSync(path.join(dir, filename), pcmToWav(drained));
-      console.log(`[audio] saved ${label} WAV → ${filename} (${drained.length} chunks)`);
+      const filename = `${this.sessionTs}_${this.shortId}_${label}${turnIndex}.wav`;
+      fs.writeFileSync(path.join(dir, filename), pcmToWav([pcmData]));
+      fs.unlinkSync(tmpPath);
+
+      console.log(
+        `[audio] saved ${label} WAV → ${filename} (${pcmData.length} PCM bytes)`,
+      );
       return filename;
     } catch (err) {
-      console.error(`[audio] save ${label} WAV failed:`, err);
+      console.error(`[audio] finalise ${label} WAV failed:`, err);
       return null;
+    }
+  }
+}
+
+// ── Startup recovery ────────────────────────────────────────────────────────
+
+/**
+ * Scans TMP_DIR for leftover `.pcm.tmp` files from a previous server run
+ * (i.e. turns that were in-flight when the server crashed or was restarted)
+ * and converts each one to a valid WAV file in the recordings directory.
+ *
+ * Call this once at server startup, before `server.listen()`.
+ */
+export function recoverTempFiles(): void {
+  ensureDir(TMP_DIR);
+
+  const files = fs.readdirSync(TMP_DIR).filter((f) => f.endsWith(".pcm.tmp"));
+
+  if (files.length === 0) {
+    console.log("[recovery] no incomplete turns found in tmp dir");
+    return;
+  }
+
+  console.log(`[recovery] found ${files.length} incomplete turn(s) — recovering…`);
+
+  const recDir = path.join(DATA_DIR, "recordings");
+  ensureDir(recDir);
+
+  for (const file of files) {
+    const tmpPath = path.join(TMP_DIR, file);
+    try {
+      const pcmData = fs.readFileSync(tmpPath);
+
+      if (pcmData.length === 0) {
+        fs.unlinkSync(tmpPath);
+        console.log(`[recovery] ${file} — empty, deleted`);
+        continue;
+      }
+
+      // Replace .pcm.tmp → .wav for the recovered file name
+      const wavName = file.replace(/\.pcm\.tmp$/, ".recovered.wav");
+      fs.writeFileSync(path.join(recDir, wavName), pcmToWav([pcmData]));
+      fs.unlinkSync(tmpPath);
+
+      console.log(`[recovery] ${file} → ${wavName} (${pcmData.length} bytes recovered)`);
+    } catch (err) {
+      console.error(`[recovery] failed to recover ${file}:`, err);
     }
   }
 }
