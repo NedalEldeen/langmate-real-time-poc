@@ -1,16 +1,8 @@
 /**
  * Tool handler — OpenAI Realtime API function call definitions and execution.
  *
- * Two categories of tools:
- *
- *   TOOL_DEFINITIONS — interactive tools the AI may call spontaneously:
- *     get_user_profile — fetches learner profile from Redis.
- *
- *   FEEDBACK_TOOL_DEFINITION — post-turn analysis, called via forced
- *     tool_choice after every normal AI response:
- *     submit_turn_feedback — structured grammar + fluency assessment of
- *       the user's last utterance.  Result is emitted to the client as a
- *       "turn_feedback" custom event; no audio response follows.
+ * TOOL_DEFINITIONS — interactive tools the AI may call spontaneously:
+ *   get_user_profile — fetches learner profile from Redis.
  *
  * Adding a new interactive tool:
  *   1. Add an entry to TOOL_DEFINITIONS with the JSON schema.
@@ -26,6 +18,9 @@
  *   Server → executeTool(name, argsJson, userId)
  *   Server → conversation.item.create   (type: "function_call_output")
  *   Server → response.create            (AI continues and speaks the result)
+ *
+ * Note: post-turn grammar/fluency feedback is handled via structured JSON
+ * text output (response.text.done) in session-handler.ts — no tool required.
  */
 
 import { UserProfileStore } from "./user-profile-store";
@@ -48,56 +43,6 @@ export const TOOL_DEFINITIONS = [
     },
   },
 ] as const;
-
-// ── §4 Structured Output — feedback tool ─────────────────────────────────────
-
-/**
- * Registered in session.update alongside TOOL_DEFINITIONS, but only ever
- * *called* via a forced response.create after each normal AI turn.
- *
- * The AI evaluates the user's last utterance and fills in:
- *   grammar_errors[]   — zero or more correction objects
- *   fluency_score      — 1 (broken) to 10 (native-like)
- *   tip                — one short actionable improvement tip
- */
-export const FEEDBACK_TOOL_DEFINITION = {
-  type:        "function" as const,
-  name:        "submit_turn_feedback",
-  description:
-    "Called automatically after each assistant response. " +
-    "Evaluate the learner's most recent spoken utterance for grammar, " +
-    "vocabulary, and fluency. Provide corrections and a concise improvement tip. " +
-    "Do not duplicate feedback from previous turns.",
-  parameters: {
-    type: "object",
-    properties: {
-      grammar_errors: {
-        type: "array",
-        description: "Grammar or vocabulary mistakes in the user's last utterance. Empty array if none.",
-        items: {
-          type: "object",
-          properties: {
-            original:   { type: "string", description: "The incorrect phrase as spoken." },
-            suggestion: { type: "string", description: "The corrected version." },
-            rule:       { type: "string", description: "One-sentence explanation of the rule." },
-          },
-          required: ["original", "suggestion", "rule"],
-        },
-      },
-      fluency_score: {
-        type:        "integer",
-        description: "Overall fluency score: 1 = very broken, 10 = fully native-like.",
-        minimum: 1,
-        maximum: 10,
-      },
-      tip: {
-        type:        "string",
-        description: "One short, actionable tip the learner can apply immediately (1–2 sentences).",
-      },
-    },
-    required: ["grammar_errors", "fluency_score", "tip"],
-  },
-} as const;
 
 // ── Tool execution handlers ───────────────────────────────────────────────────
 

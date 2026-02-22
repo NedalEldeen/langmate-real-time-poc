@@ -81,3 +81,16 @@ export async function uploadRecording(localPath: string, filename: string): Prom
 
   console.log(`[minio] uploaded ${filename} → ${b}/${objectKey}`);
 }
+
+/**
+ * Returns a presigned GET URL for a recording already in MinIO.
+ *
+ * The URL is valid for 7 days — long enough for in-session playback and
+ * short-term review, while still expiring automatically.
+ *
+ * @param filename - Basename (e.g. "20260221_abc12345_ai1.wav").
+ */
+export async function getPresignedUrl(filename: string): Promise<string> {
+  const SEVEN_DAYS = 7 * 24 * 60 * 60;
+  return getClient().presignedGetObject(bucket(), `recordings/${filename}`, SEVEN_DAYS);
+}

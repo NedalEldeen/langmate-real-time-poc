@@ -24,12 +24,13 @@
  *
  * ── §4 Structured Output — per-turn feedback ─────────────────────────────
  *
- *   After every normal AI response.done, the server sends a second forced
- *   response.create (text-only, tool_choice: submit_turn_feedback).
- *   The AI fills in grammar_errors[], fluency_score, and a tip.
- *   The server emits a "turn_feedback" custom event to the client without
- *   triggering another AI response.  The client renders a feedback card
- *   below the AI bubble.
+ *   After every normal AI response.done, the server sends a second silent
+ *   response.create (text-only, JSON instructions — no tool_choice).
+ *   The AI returns a raw JSON object with grammar_errors[], fluency_score,
+ *   and a tip via response.text.done.
+ *   The server parses it and emits a "turn_feedback" custom event to the
+ *   client, which renders a feedback card below the AI bubble.
+ *   All events during the feedback round-trip are suppressed from the client.
  *
  *   §3a — Dynamic prompt injection
  *     User profile (name, level, etc.) is fetched from Redis at session start
@@ -82,7 +83,7 @@ import { SessionStore } from "./session-store";
 import { HistoryStore, type ConversationTurn } from "./history-store";
 import { getCachedSummary, generateAndCacheSummary } from "./session-summarizer";
 import { UserProfileStore, type UserProfile } from "./user-profile-store";
-import { TOOL_DEFINITIONS, FEEDBACK_TOOL_DEFINITION, executeTool } from "./tool-handler";
+import { TOOL_DEFINITIONS, executeTool } from "./tool-handler";
 import { uploadRecording } from "./storage-service";
 
 // ── System prompt builder ─────────────────────────────────────────────────────
@@ -171,10 +172,13 @@ export function handleRealtimeSession(socket: Socket): void {
   let suppressNextResponseCreated = false;
 
   /**
-   * Set to true while waiting for the AI to call submit_turn_feedback.
-   * Distinguishes the background feedback round-trip from regular tool calls.
+   * Set to true while waiting for the AI's structured JSON feedback response.
+   * All OpenAI events during this round-trip are suppressed from the client.
    */
   let awaitingFeedback = false;
+
+  /** Accumulates response.text.delta chunks during the feedback round-trip. */
+  let feedbackTextBuffer = "";
 
   // ── Pre-fetch: profile + summary + history (all in parallel) ────────────
   // Starts immediately when the socket connects, overlapping with the OpenAI
@@ -248,8 +252,8 @@ export function handleRealtimeSession(socket: Socket): void {
               output_audio_format: "pcm16",
               input_audio_transcription: { model: "gpt-4o-mini-transcribe" },
               turn_detection: null,
-              // §3b / §4 — register all tools (interactive + feedback)
-              tools:       [...TOOL_DEFINITIONS, FEEDBACK_TOOL_DEFINITION],
+              // §3b — register interactive tools (feedback uses plain JSON text, no tool needed)
+              tools:       [...TOOL_DEFINITIONS],
               tool_choice: "auto",
             },
           }),
@@ -353,114 +357,112 @@ export function handleRealtimeSession(socket: Socket): void {
       sessionTurns.push({ role: "assistant", text });
     }
 
+    // ── §4 Feedback text streaming ────────────────────────────────────────
+    // During the feedback round-trip, OpenAI streams a plain JSON string via
+    // response.text.delta / response.text.done instead of audio.
+
+    if (t === "response.text.delta" && awaitingFeedback && typeof event["delta"] === "string") {
+      feedbackTextBuffer += event["delta"] as string;
+    }
+
+    if (t === "response.text.done" && awaitingFeedback) {
+      const rawText = (event["text"] as string | undefined) ?? feedbackTextBuffer;
+      console.log(`[feedback] text.done: ${rawText.slice(0, 160)}`);
+
+      let feedback: unknown = null;
+      try {
+        // Strip any accidental markdown fences the model might add
+        const clean = rawText.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "").trim();
+        feedback = JSON.parse(clean);
+      } catch {
+        console.warn("[feedback] could not parse feedback JSON — skipping");
+      }
+
+      if (feedback) {
+        socket.emit("message", { type: "turn_feedback", feedback });
+      }
+    }
+
     // ── Determine whether to forward this event to the client ────────────
     //
-    // Two events are suppressed to keep the client's bubble/state intact
-    // across a tool call round-trip:
+    // Events suppressed to keep the client's bubble/state intact:
+    //
+    //   awaitingFeedback (any event):
+    //     All events during the silent feedback round-trip are suppressed.
+    //     The client never sees the feedback response.create / text streaming.
     //
     //   response.done (function_call phase):
-    //     Suppressed so the client stays in 'responding' state.
-    //     The server will execute the tool and call response.create.
+    //     Suppressed so the client stays in 'responding' state while the
+    //     server executes the tool and sends response.create.
     //
-    //   response.created (continuation phase):
-    //     Suppressed so the client doesn't create a second empty bubble.
+    //   response.created (tool-continuation phase):
+    //     Suppressed so the client doesn't open a second empty bubble.
     //     The existing bubble gets filled when audio/text streams.
     //
     //   response.function_call_arguments.delta:
     //     Suppressed — high-frequency internal event, not useful to the UI.
 
-    const isToolCallDone  = t === "response.done" && activeFunctionCall !== null;
-    const isContinuation  = t === "response.created" && suppressNextResponseCreated;
-    const isArgsDelta     = t === "response.function_call_arguments.delta";
-    // Suppress the silent feedback function-call item so the client never
-    // sees a "Calling submit_turn_feedback…" bubble.
-    const isFeedbackItem  =
-      t === "response.output_item.added" &&
-      awaitingFeedback &&
-      (event["item"] as Record<string, unknown>)?.["type"] === "function_call";
+    const isToolCallDone = t === "response.done" && activeFunctionCall !== null;
+    const isContinuation = t === "response.created" && suppressNextResponseCreated;
+    const isArgsDelta    = t === "response.function_call_arguments.delta";
 
     if (isContinuation) suppressNextResponseCreated = false;
 
-    if (!isToolCallDone && !isContinuation && !isArgsDelta && !isFeedbackItem) {
+    if (!isToolCallDone && !isContinuation && !isArgsDelta && !awaitingFeedback) {
       socket.emit("message", event);
     }
 
-    // ── response.done — normal path or tool call path ────────────────────
+    // ── response.done — normal path, tool call path, or feedback path ────
     if (t === "response.done") {
 
       if (activeFunctionCall) {
-        // ── Tool call path ──────────────────────────────────────────────
+        // ── Interactive tool path (e.g. get_user_profile) ───────────────
         const call = activeFunctionCall;
         activeFunctionCall = null;
+        suppressNextResponseCreated = true;
 
-        if (call.name === "submit_turn_feedback") {
-          // ── §4 Feedback path — parse JSON and emit to client ─────────
-          awaitingFeedback = false;
-          console.log(`[feedback] received: ${call.argsBuffer.slice(0, 120)}`);
+        executeTool(call.name, call.argsBuffer, userId)
+          .then((result) => {
+            // Emit custom event so client clears the "Calling tool…" indicator
+            socket.emit("message", { type: "tool_call_complete", toolName: call.name });
 
-          let feedback: unknown = null;
-          try {
-            feedback = JSON.parse(call.argsBuffer);
-          } catch {
-            console.warn("[feedback] could not parse feedback JSON — skipping");
-          }
+            // Submit the tool result to OpenAI
+            openaiWs.send(
+              JSON.stringify({
+                type: "conversation.item.create",
+                item: {
+                  type:    "function_call_output",
+                  call_id: call.callId,
+                  output:  result,
+                },
+              }),
+            );
 
-          if (feedback) {
-            socket.emit("message", { type: "turn_feedback", feedback });
-          }
+            // Ask the AI to continue speaking with the result — explicit modalities
+            // so OpenAI doesn't inherit the text-only setting from the feedback request.
+            openaiWs.send(JSON.stringify({ type: "response.create", response: { modalities: ["text", "audio"] } }));
+            console.log(`[tools] ${call.name} result submitted, response.create sent`);
+          })
+          .catch((err: unknown) => {
+            console.error(`[tools] ${call.name} failed:`, err);
+            socket.emit("message", { type: "tool_call_complete", toolName: call.name });
+            openaiWs.send(
+              JSON.stringify({
+                type: "conversation.item.create",
+                item: { type: "function_call_output", call_id: call.callId, output: JSON.stringify({ error: "Tool failed" }) },
+              }),
+            );
+            openaiWs.send(JSON.stringify({ type: "response.create", response: { modalities: ["text", "audio"] } }));
+          });
 
-          // Close the tool call loop — no response.create (silent)
-          openaiWs.send(
-            JSON.stringify({
-              type: "conversation.item.create",
-              item: {
-                type:    "function_call_output",
-                call_id: call.callId,
-                output:  JSON.stringify({ ok: true }),
-              },
-            }),
-          );
-          console.log("[feedback] tool loop closed — no response.create");
+      } else if (awaitingFeedback) {
+        // ── §4 Feedback round-trip complete ─────────────────────────────
+        // response.text.done already fired and emitted turn_feedback to client.
+        awaitingFeedback   = false;
+        feedbackTextBuffer = "";
+        console.log("[feedback] round-trip complete");
 
-        } else {
-          // ── Regular interactive tool path ─────────────────────────────
-          suppressNextResponseCreated = true;
-
-          executeTool(call.name, call.argsBuffer, userId)
-            .then((result) => {
-              // Emit custom event so client clears the "Calling tool…" indicator
-              socket.emit("message", { type: "tool_call_complete", toolName: call.name });
-
-              // Submit the tool result to OpenAI
-              openaiWs.send(
-                JSON.stringify({
-                  type: "conversation.item.create",
-                  item: {
-                    type:    "function_call_output",
-                    call_id: call.callId,
-                    output:  result,
-                  },
-                }),
-              );
-
-              // Ask the AI to continue speaking with the result
-              openaiWs.send(JSON.stringify({ type: "response.create" }));
-              console.log(`[tools] ${call.name} result submitted, response.create sent`);
-            })
-            .catch((err: unknown) => {
-              console.error(`[tools] ${call.name} failed:`, err);
-              socket.emit("message", { type: "tool_call_complete", toolName: call.name });
-              openaiWs.send(
-                JSON.stringify({
-                  type: "conversation.item.create",
-                  item: { type: "function_call_output", call_id: call.callId, output: JSON.stringify({ error: "Tool failed" }) },
-                }),
-              );
-              openaiWs.send(JSON.stringify({ type: "response.create" }));
-            });
-        }
-
-      } else if (!awaitingFeedback) {
+      } else {
         // ── Normal response path ────────────────────────────────────────
         const filename = recorder.saveAiAudio();
 
@@ -470,19 +472,23 @@ export function handleRealtimeSession(socket: Socket): void {
 
         if (filename) {
           const aiLocalPath = path.join(DATA_DIR, "recordings", filename);
+          // Emit immediately so the audio player appears alongside the feedback card.
           socket.emit("message", { type: "ai_audio_ready", url: `/recordings/${filename}` });
           console.log(`[session] ai_audio_ready → ${filename}`);
           uploadRecording(aiLocalPath, filename)
             .then(() => {
-              fs.unlink(aiLocalPath, (err) => {
-                if (err) console.error(`[cleanup] failed to delete ${filename}:`, err);
-                else console.log(`[cleanup] deleted local file after MinIO upload: ${filename}`);
-              });
+              // Delay deletion so the browser has time to fully load/buffer the file.
+              setTimeout(() => {
+                fs.unlink(aiLocalPath, (err) => {
+                  if (err) console.error(`[cleanup] failed to delete ${filename}:`, err);
+                  else console.log(`[cleanup] deleted local file: ${filename}`);
+                });
+              }, 30_000);
             })
             .catch((err: unknown) => console.error("[minio] ai audio upload failed:", err));
         }
 
-        // §4 — request structured feedback silently (text-only, forced tool)
+        // §4 — request structured JSON feedback silently (text-only, no tool)
         awaitingFeedback            = true;
         suppressNextResponseCreated = true;
 
@@ -491,14 +497,15 @@ export function handleRealtimeSession(socket: Socket): void {
             type: "response.create",
             response: {
               modalities:   ["text"],
-              instructions: "Evaluate the learner's most recent utterance. " +
-                            "Call submit_turn_feedback with grammar corrections, " +
-                            "a fluency score (1–10), and one actionable tip.",
-              tool_choice: { type: "function", function: { name: "submit_turn_feedback" } },
+              instructions:
+                "Evaluate the learner's most recent spoken utterance. " +
+                "Reply ONLY with valid JSON — no markdown fences, no extra text — in exactly this shape:\n" +
+                '{"grammar_errors":[{"original":"...","suggestion":"...","rule":"..."}],"fluency_score":<1-10>,"tip":"..."}\n' +
+                "If there are no grammar errors use an empty array [].",
             },
           }),
         );
-        console.log("[feedback] requested submit_turn_feedback");
+        console.log("[feedback] requested JSON feedback (text-only response)");
       }
     }
   });
@@ -550,7 +557,8 @@ export function handleRealtimeSession(socket: Socket): void {
       }
 
       openaiWs.send(JSON.stringify({ type: "input_audio_buffer.commit" }));
-      openaiWs.send(JSON.stringify({ type: "response.create" }));
+      // Explicit modalities so OpenAI never inherits text-only from the feedback request.
+      openaiWs.send(JSON.stringify({ type: "response.create", response: { modalities: ["text", "audio"] } }));
       console.log("[session] response.create sent");
       return;
     }
