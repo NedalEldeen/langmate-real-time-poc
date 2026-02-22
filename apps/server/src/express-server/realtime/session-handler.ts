@@ -70,6 +70,7 @@
  *           → user speaks (AI has full context)
  */
 
+import fs from "fs";
 import path from "path";
 import WebSocket from "ws";
 import { Socket } from "socket.io";
@@ -97,9 +98,11 @@ function buildInstructions(
   profile:  UserProfile,
 ): string {
   const parts: string[] = [
-    `You are a helpful language learning conversation partner.`,
-    `Conduct the entire conversation in ${language}.`,
-    `Keep answers short and natural — like a real conversation.`,
+    `You are a language learning conversation partner. Your only purpose is to help the user practice speaking ${language}.`,
+    `Conduct every part of the conversation in ${language}.`,
+    `Keep your responses short and natural — like a real conversation between two people.`,
+    `Stay strictly focused on language learning: have conversations, gently correct grammar and vocabulary mistakes inline, and help the user improve their ${language}.`,
+    `If the user says anything unrelated to language practice (for example: general knowledge questions, news, coding help, or any non-language topic), briefly acknowledge it and redirect them back to practicing ${language}. Do not answer off-topic questions.`,
   ];
 
   // §3a — inject profile fields so the AI has immediate context without a tool call
@@ -366,13 +369,19 @@ export function handleRealtimeSession(socket: Socket): void {
     //   response.function_call_arguments.delta:
     //     Suppressed — high-frequency internal event, not useful to the UI.
 
-    const isToolCallDone     = t === "response.done" && activeFunctionCall !== null;
-    const isContinuation     = t === "response.created" && suppressNextResponseCreated;
-    const isArgsDelta        = t === "response.function_call_arguments.delta";
+    const isToolCallDone  = t === "response.done" && activeFunctionCall !== null;
+    const isContinuation  = t === "response.created" && suppressNextResponseCreated;
+    const isArgsDelta     = t === "response.function_call_arguments.delta";
+    // Suppress the silent feedback function-call item so the client never
+    // sees a "Calling submit_turn_feedback…" bubble.
+    const isFeedbackItem  =
+      t === "response.output_item.added" &&
+      awaitingFeedback &&
+      (event["item"] as Record<string, unknown>)?.["type"] === "function_call";
 
     if (isContinuation) suppressNextResponseCreated = false;
 
-    if (!isToolCallDone && !isContinuation && !isArgsDelta) {
+    if (!isToolCallDone && !isContinuation && !isArgsDelta && !isFeedbackItem) {
       socket.emit("message", event);
     }
 
@@ -460,9 +469,16 @@ export function handleRealtimeSession(socket: Socket): void {
         );
 
         if (filename) {
+          const aiLocalPath = path.join(DATA_DIR, "recordings", filename);
           socket.emit("message", { type: "ai_audio_ready", url: `/recordings/${filename}` });
           console.log(`[session] ai_audio_ready → ${filename}`);
-          uploadRecording(path.join(DATA_DIR, "recordings", filename), filename)
+          uploadRecording(aiLocalPath, filename)
+            .then(() => {
+              fs.unlink(aiLocalPath, (err) => {
+                if (err) console.error(`[cleanup] failed to delete ${filename}:`, err);
+                else console.log(`[cleanup] deleted local file after MinIO upload: ${filename}`);
+              });
+            })
             .catch((err: unknown) => console.error("[minio] ai audio upload failed:", err));
         }
 
@@ -517,7 +533,14 @@ export function handleRealtimeSession(socket: Socket): void {
       );
       const userFile = recorder.saveUserAudio();
       if (userFile) {
-        uploadRecording(path.join(DATA_DIR, "recordings", userFile), userFile)
+        const userLocalPath = path.join(DATA_DIR, "recordings", userFile);
+        uploadRecording(userLocalPath, userFile)
+          .then(() => {
+            fs.unlink(userLocalPath, (err) => {
+              if (err) console.error(`[cleanup] failed to delete ${userFile}:`, err);
+              else console.log(`[cleanup] deleted local file after MinIO upload: ${userFile}`);
+            });
+          })
           .catch((err: unknown) => console.error("[minio] user audio upload failed:", err));
       }
 
