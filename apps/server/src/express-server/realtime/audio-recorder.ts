@@ -22,12 +22,17 @@
  *   data/recordings/.tmp/<sessionTs>_<shortId>_ai<N>.pcm.tmp    (in-flight)
  *   data/recordings/<sessionTs>_<shortId>_user<N>.wav           (completed)
  *   data/recordings/<sessionTs>_<shortId>_ai<N>.wav             (completed)
+ * 
+ * Set ENABLE_RECORDING_FILES to false to disable file generation.
  */
 
 import fs   from "fs";
 import path from "path";
 import { DATA_DIR, TMP_DIR } from "./constants";
 import { pcmToWav } from "./pcm-utils";
+
+/** Set to false to disable recording file generation */
+const ENABLE_RECORDING_FILES = false;
 
 /** Ensures a directory exists, creating it (and parents) if necessary. */
 function ensureDir(dir: string): void {
@@ -71,6 +76,8 @@ export class AudioRecorder {
    * @param base64 - Base64-encoded PCM16 audio chunk from the browser.
    */
   appendUserChunk(base64: string): void {
+    if (!ENABLE_RECORDING_FILES) return;
+    
     const chunk = Buffer.from(base64, "base64");
 
     if (!this.userTmpPath) {
@@ -80,7 +87,7 @@ export class AudioRecorder {
         `${this.sessionTs}_${this.shortId}_user${this.userTurnIndex + 1}.pcm.tmp`,
       );
       this.userChunkCount_ = 0;
-      console.log(`[audio] user tmp opened → ${path.basename(this.userTmpPath)}`);
+            console.log(`[audio] user tmp opened → ${path.basename(this.userTmpPath)}`);
     }
 
     fs.appendFileSync(this.userTmpPath, chunk);
@@ -97,6 +104,8 @@ export class AudioRecorder {
    * @param base64 - Base64-encoded PCM16 audio chunk from OpenAI.
    */
   appendAiChunk(base64: string): void {
+    if (!ENABLE_RECORDING_FILES) return;
+    
     const chunk = Buffer.from(base64, "base64");
 
     if (!this.aiTmpPath) {
@@ -120,6 +129,8 @@ export class AudioRecorder {
    * @returns The saved filename (basename only), or null if no audio was recorded.
    */
   saveUserAudio(): string | null {
+    if (!ENABLE_RECORDING_FILES) return null;
+    
     const tmp = this.userTmpPath;
     this.userTmpPath    = null;
     this.userChunkCount_ = 0;
@@ -135,6 +146,8 @@ export class AudioRecorder {
    * @returns The saved filename (basename only), or null if no audio was recorded.
    */
   saveAiAudio(): string | null {
+    if (!ENABLE_RECORDING_FILES) return null;
+    
     const tmp = this.aiTmpPath;
     this.aiTmpPath = null;
     return this.finaliseTmp(tmp, "ai", ++this.aiTurnIndex);
@@ -198,6 +211,8 @@ export class AudioRecorder {
  * Call this once at server startup, before `server.listen()`.
  */
 export function recoverTempFiles(): void {
+  if (!ENABLE_RECORDING_FILES) return;
+  
   ensureDir(TMP_DIR);
 
   const files = fs.readdirSync(TMP_DIR).filter((f) => f.endsWith(".pcm.tmp"));

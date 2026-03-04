@@ -15,11 +15,16 @@
  *   Assistant: I'm doing great, thanks for asking!
  *
  *   ...
+ * 
+ * Set ENABLE_TRANSCRIPT_FILES to false to disable file generation.
  */
 
 import fs from "fs";
 import path from "path";
 import { DATA_DIR } from "./constants";
+
+/** Set to false to disable transcript file generation */
+const ENABLE_TRANSCRIPT_FILES = false;
 
 export class TranscriptManager {
   /** Absolute path to the session's .txt file once initialised. */
@@ -36,6 +41,8 @@ export class TranscriptManager {
    * @param language  - Conversation language chosen by the user.
    */
   init(sessionTs: string, shortId: string, language: string): void {
+    if (!ENABLE_TRANSCRIPT_FILES) return;
+    
     try {
       const dir = path.join(DATA_DIR, "transcripts");
       fs.mkdirSync(dir, { recursive: true });

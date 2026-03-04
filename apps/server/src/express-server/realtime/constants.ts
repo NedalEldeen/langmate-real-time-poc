@@ -10,9 +10,10 @@ import path from "path";
 /**
  * OpenAI Realtime API WebSocket endpoint.
  * The `model` query parameter selects the underlying LLM + voice model.
+ * Using gpt-4o-realtime-preview-2024-12-17 for stable transcription support.
  */
 export const OPENAI_REALTIME_URL =
-  "wss://api.openai.com/v1/realtime?model=gpt-4o-realtime-preview";
+  "wss://api.openai.com/v1/realtime?model=gpt-4o-mini-realtime-preview";
 
 /**
  * Root directory for all persisted session data (recordings + transcripts).

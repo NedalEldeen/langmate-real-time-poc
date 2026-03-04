@@ -183,12 +183,21 @@ export function handleRealtimeSession(socket: Socket): void {
   // ── Pre-fetch: profile + summary + history (all in parallel) ────────────
   // Starts immediately when the socket connects, overlapping with the OpenAI
   // WS connection + session.created handshake.
-  const prefetchPromise = Promise.all([
-    getCachedSummary(userId),
-    historyStore.getRecentTurns(HISTORY_INJECTION_TURNS),
-    new UserProfileStore(userId).get(),
-  ]).catch((err: unknown): [null, ConversationTurn[], UserProfile] => {
-    console.error("[session] pre-fetch failed:", err);
+  // Timeout after 2s so that if Redis is down, we still send session.update
+  // with defaults rather than hanging forever.
+  const PREFETCH_TIMEOUT_MS = 2000;
+  const prefetchPromise = Promise.race([
+    Promise.all([
+      getCachedSummary(userId),
+      historyStore.getRecentTurns(HISTORY_INJECTION_TURNS),
+      new UserProfileStore(userId).get(),
+    ]),
+    new Promise<[null, ConversationTurn[], UserProfile]>((resolve) =>
+      setTimeout(() => {
+        resolve([null, [], {}]);
+      }, PREFETCH_TIMEOUT_MS),
+    ),
+  ]).catch((): [null, ConversationTurn[], UserProfile] => {
     return [null, [], {}];
   });
 
@@ -408,6 +417,11 @@ export function handleRealtimeSession(socket: Socket): void {
 
     if (isContinuation) suppressNextResponseCreated = false;
 
+    // Debug: log state for important events
+    if (t === "response.done" || t === "response.created") {
+      console.log(`[session] Event: ${t}, awaitingFeedback=${awaitingFeedback}, activeFunctionCall=${!!activeFunctionCall}`);
+    }
+
     if (!isToolCallDone && !isContinuation && !isArgsDelta && !awaitingFeedback) {
       socket.emit("message", event);
     }
@@ -420,6 +434,14 @@ export function handleRealtimeSession(socket: Socket): void {
         const call = activeFunctionCall;
         activeFunctionCall = null;
         suppressNextResponseCreated = true;
+        
+        // If a tool call happened during feedback phase, reset awaitingFeedback
+        // This can happen if OpenAI ignores the tools:[] override
+        if (awaitingFeedback) {
+          console.log(`[session] Tool call during feedback phase - resetting awaitingFeedback`);
+          awaitingFeedback = false;
+          feedbackTextBuffer = "";
+        }
 
         executeTool(call.name, call.argsBuffer, userId)
           .then((result) => {
@@ -458,12 +480,14 @@ export function handleRealtimeSession(socket: Socket): void {
       } else if (awaitingFeedback) {
         // ── §4 Feedback round-trip complete ─────────────────────────────
         // response.text.done already fired and emitted turn_feedback to client.
+        console.log(`[session] Feedback complete, resetting awaitingFeedback to false`);
         awaitingFeedback   = false;
         feedbackTextBuffer = "";
-        console.log("[feedback] round-trip complete");
+                console.log("[feedback] round-trip complete");
 
       } else {
         // ── Normal response path ────────────────────────────────────────
+        console.log(`[session] Normal response.done, setting awaitingFeedback=true`);
         const filename = recorder.saveAiAudio();
 
         sessionStore.incrementTurns().catch((err: unknown) =>
@@ -497,6 +521,7 @@ export function handleRealtimeSession(socket: Socket): void {
             type: "response.create",
             response: {
               modalities:   ["text"],
+              tools:        [], // Explicitly disable tools for feedback
               instructions:
                 "Evaluate the learner's most recent spoken utterance. " +
                 "Reply ONLY with valid JSON — no markdown fences, no extra text — in exactly this shape:\n" +
@@ -505,7 +530,7 @@ export function handleRealtimeSession(socket: Socket): void {
             },
           }),
         );
-        console.log("[feedback] requested JSON feedback (text-only response)");
+                console.log("[feedback] requested JSON feedback (text-only response)");
       }
     }
   });
@@ -519,7 +544,7 @@ export function handleRealtimeSession(socket: Socket): void {
   });
 
   openaiWs.on("close", () => {
-    console.log(`[session] OpenAI WebSocket closed — disconnecting client`);
+        console.log(`[session] OpenAI WebSocket closed — disconnecting client`);
     socket.disconnect(true);
   });
 
@@ -527,17 +552,42 @@ export function handleRealtimeSession(socket: Socket): void {
   // Client → OpenAI
   // ════════════════════════════════════════════════════════════════════════
 
+  // Track audio stats for debugging
+  let audioChunksReceived = 0;
+  let totalAudioBytes = 0;
+
   socket.on("message", (data: unknown) => {
     const msg = data as Record<string, unknown>;
 
+    // Debug: log important client events
+    if (msg["type"] === "done_talking" || (msg["type"] === "input_audio_buffer.append" && audioChunksReceived === 0)) {
+      console.log(`[session] Client event: ${msg["type"]}, awaitingFeedback=${awaitingFeedback}`);
+    }
+
     if (msg["type"] === "input_audio_buffer.append" && typeof msg["audio"] === "string") {
-      recorder.appendUserChunk(msg["audio"]);
+      const audioData = msg["audio"] as string;
+      audioChunksReceived++;
+      
+      // Decode base64 to get actual byte count
+      const byteLength = Math.floor(audioData.length * 3 / 4);
+      totalAudioBytes += byteLength;
+      
+      recorder.appendUserChunk(audioData);
+      
+      // Forward to OpenAI
+      if (openaiWs.readyState === WebSocket.OPEN) {
+        openaiWs.send(JSON.stringify({
+          type: "input_audio_buffer.append",
+          audio: audioData,
+        }));
+      }
     }
 
     if (msg["type"] === "done_talking") {
-      console.log(
-        `[session] done_talking  userChunks=${recorder.userChunkCount}  openaiState=${openaiWs.readyState}`,
-      );
+      // Reset stats for next recording
+      audioChunksReceived = 0;
+      totalAudioBytes = 0;
+      
       const userFile = recorder.saveUserAudio();
       if (userFile) {
         const userLocalPath = path.join(DATA_DIR, "recordings", userFile);
@@ -564,7 +614,9 @@ export function handleRealtimeSession(socket: Socket): void {
     }
 
     if (openaiWs.readyState !== WebSocket.OPEN) return;
-    openaiWs.send(JSON.stringify(data));
+    if (msg["type"] !== "input_audio_buffer.append") {
+      openaiWs.send(JSON.stringify(data));
+    }
   });
 
   // ── Session teardown ────────────────────────────────────────────────────
