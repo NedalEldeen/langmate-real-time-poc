@@ -15,7 +15,7 @@ import Constants from "expo-constants";
  * Find it by running: ipconfig getifaddr en0
  * UPDATE THIS to match your network!
  */
-const DEV_SERVER_IP = "192.168.1.101";
+const DEV_SERVER_IP = "192.168.1.2";
 
 // Detect if running on simulator
 // Constants.isDevice is true for physical devices, false for simulators
