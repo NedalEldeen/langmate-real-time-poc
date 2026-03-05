@@ -11,9 +11,11 @@ const PORT = process.env.SERVER_PORT ?? 3000;
 recoverTempFiles();
 
 // Ensure the MinIO bucket exists before any sessions start uploading.
-ensureBucket().catch((err: unknown) =>
-  console.error("[minio] ensureBucket failed (recordings will not be uploaded):", err),
-);
+// MinIO is off by default; set MINIO_ENABLED=true and run MinIO (e.g. docker-compose up minio) to enable.
+ensureBucket().catch((err: unknown) => {
+  console.error("[minio] ensureBucket failed (recordings will not be uploaded):", err);
+  console.info("[minio] Recordings are still saved locally. Set MINIO_ENABLED=true only when MinIO is running.");
+});
 
 const server = http.createServer(app);
 

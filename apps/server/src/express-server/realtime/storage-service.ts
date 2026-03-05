@@ -5,13 +5,11 @@
  * uploaded here asynchronously.  Local disk serving via Express stays intact,
  * so the playback URL never changes.  MinIO is an additional durable store.
  *
- * Object key layout:
- *   <bucket>/
- *     recordings/
- *       <sessionTs>_<shortId>_user<N>.wav
- *       <sessionTs>_<shortId>_ai<N>.wav
+ * MinIO is OFF by default. Set MINIO_ENABLED=true (and run MinIO, e.g. via
+ * docker-compose up minio) to upload recordings to MinIO.
  *
  * Environment variables (see .env.example):
+ *   MINIO_ENABLED     — "true" to enable MinIO (default: off)
  *   MINIO_ENDPOINT    — hostname, e.g. "localhost"
  *   MINIO_PORT        — port, e.g. 9000
  *   MINIO_ACCESS_KEY  — MinIO root user or IAM access key
@@ -21,6 +19,10 @@
  */
 
 import { Client } from "minio";
+
+function isMinioEnabled(): boolean {
+  return process.env.MINIO_ENABLED === "true";
+}
 
 // ── Singleton client ──────────────────────────────────────────────────────────
 
@@ -46,17 +48,18 @@ const bucket = (): string => process.env.MINIO_BUCKET ?? "langmate-media";
 /**
  * Creates the configured bucket if it doesn't already exist.
  * Call once at server startup — safe to call multiple times.
+ * No-op when MinIO is not enabled (default).
  */
 export async function ensureBucket(): Promise<void> {
+  if (!isMinioEnabled()) {
+    return;
+  }
   const client = getClient();
   const b      = bucket();
 
   const exists = await client.bucketExists(b);
   if (!exists) {
     await client.makeBucket(b);
-    console.log(`[minio] bucket "${b}" created`);
-  } else {
-    console.log(`[minio] bucket "${b}" ready`);
   }
 }
 
@@ -66,11 +69,13 @@ export async function ensureBucket(): Promise<void> {
  * Uses `fPutObject` so the SDK streams directly from disk — no extra memory
  * buffer needed.  The caller should fire-and-forget with `.catch()` so a
  * failed upload never blocks the session.
+ * No-op when MinIO is not enabled (default).
  *
  * @param localPath - Absolute path to the WAV file on disk.
  * @param filename  - Basename (e.g. "20260221_abc12345_ai1.wav").
  */
 export async function uploadRecording(localPath: string, filename: string): Promise<void> {
+  if (!isMinioEnabled()) return;
   const client    = getClient();
   const b         = bucket();
   const objectKey = `recordings/${filename}`;
@@ -78,8 +83,6 @@ export async function uploadRecording(localPath: string, filename: string): Prom
   await client.fPutObject(b, objectKey, localPath, {
     "Content-Type": "audio/wav",
   });
-
-  console.log(`[minio] uploaded ${filename} → ${b}/${objectKey}`);
 }
 
 /**
@@ -87,10 +90,12 @@ export async function uploadRecording(localPath: string, filename: string): Prom
  *
  * The URL is valid for 7 days — long enough for in-session playback and
  * short-term review, while still expiring automatically.
+ * Throws when MinIO is not enabled.
  *
  * @param filename - Basename (e.g. "20260221_abc12345_ai1.wav").
  */
 export async function getPresignedUrl(filename: string): Promise<string> {
+  if (!isMinioEnabled()) throw new Error("MinIO is disabled");
   const SEVEN_DAYS = 7 * 24 * 60 * 60;
   return getClient().presignedGetObject(bucket(), `recordings/${filename}`, SEVEN_DAYS);
 }

@@ -1,19 +1,11 @@
-import { StatusBar } from 'expo-status-bar';
-import { StyleSheet, Text, View } from 'react-native';
+import { StatusBar } from "expo-status-bar";
+import { VoiceChat } from "./src/screens/VoiceChat";
 
 export default function App() {
   return (
-    <View style={styles.container}>
-      <Text>Langmate POC</Text>
-    </View>
+    <>
+      <StatusBar style="light" />
+      <VoiceChat />
+    </>
   );
 }
-
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#fff',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-});
